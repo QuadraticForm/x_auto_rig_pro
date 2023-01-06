@@ -3016,7 +3016,11 @@ def _retarget(self):
                     ik_loc.length = ikloc_off.length   
                     ik_loc.parent = ikloc_off
                     
-                    if preserve:
+                    # NID, bug fix
+                    if preserve and (bone_item.ik_world is False):
+                    # no NID original
+                    # if preserve:
+                    # end NID
                         ik_offset_vec = eb_source_bone.head - mat_redef_rest[source_bone_name].to_translation()
                         ik_loc.head += ik_offset_vec
                         ik_loc.tail += ik_offset_vec
@@ -3268,9 +3272,25 @@ def _retarget(self):
         bpy.ops.object.mode_set(mode='POSE')
         bpy.ops.pose.select_all(action='DESELECT')
 
+        # NID check if is arp armature
+        
+        c_traj = target_rig.pose.bones.get("c_traj")
+        c_pos = target_rig.pose.bones.get("c_pos")
+    
+        is_arp = c_traj and c_pos
+
+        # end NID
+
 
         for bone_item in scn.bones_map:
             if bone_item.name != "" and bone_item.name != "None" and context.active_object.pose.bones.get(bone_item.name):
+
+                # NID skip non arp controller bones
+                
+                if is_arp and (bone_item.name.startswith("c_") is False):
+                    continue
+
+                # end NID
                 
                 pose_bone = context.active_object.pose.bones[bone_item.name]              
                 context.active_object.data.bones.active = pose_bone.bone
