@@ -2673,24 +2673,33 @@ def _retarget(self):
             bpy.context.active_object.name = scn.target_rig + "_local"
         else:
             set_active_object(scn.target_rig + "_local")
+
+    # NID
+    x_current_as_init = True
+    x_target_rig_dupl = bpy.context.active_object
+    # NID END
     
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
     set_active_object(scn.target_rig)
     
-    # unlink current action and reset pose
-    bpy.ops.object.mode_set(mode='POSE')
     
-    anim_data = target_rig.animation_data
-    if anim_data:
-        if anim_data.action:
-            anim_data.action = None
     
-    try:
-        bpy.ops.arp.reset_pose()        
-        set_ik_fk_switch_remap()
-    except:
-        pass
+    # NID
+    if x_current_as_init is False:
+    # NID END
+        # unlink current action and reset pose
+        bpy.ops.object.mode_set(mode='POSE')
+
+        anim_data = target_rig.animation_data
+        if anim_data:
+            if anim_data.action:
+                anim_data.action = None
+        try:
+            bpy.ops.arp.reset_pose()        
+            set_ik_fk_switch_remap()
+        except:
+            pass
 
     # is it already bound?
     is_already_bound = False
@@ -2739,21 +2748,24 @@ def _retarget(self):
         if preserve:        
             # get target bones matrices in rest pose
             bpy.ops.object.mode_set(mode='POSE')
-            
-            #   zero out pose     
-            anim_data = target_rig.animation_data
-            if anim_data:
-                if anim_data.action:
-                    anim_data.action = None
+
+            # NID
+            if x_current_as_init is False:
+            # NID END
+                #   zero out pose     
+                anim_data = target_rig.animation_data
+                if anim_data:
+                    if anim_data.action:
+                        anim_data.action = None
+                        
+                for pb_tar in target_rig.pose.bones:
+                    reset_pbone_transforms(pb_tar)    
                     
-            for pb_tar in target_rig.pose.bones:
-                reset_pbone_transforms(pb_tar)    
-                
-            scn.frame_set(scn.frame_current)# bones transforms update hack
+                scn.frame_set(scn.frame_current)# bones transforms update hack
             
             for pb_tar in target_rig.pose.bones:
                 target_mat_rest[pb_tar.name] = target_rig.matrix_world @ pb_tar.matrix
-            
+
             target_rig.data.pose_position = 'POSE'
             
             # compute diff with source bones matrices in redefined rest pose
@@ -2807,14 +2819,29 @@ def _retarget(self):
         tar_bones_dict = {}        
         obj_mat = local_tar_rig.matrix_world
         
-        for edit_bone in local_tar_rig.data.edit_bones:
-            tar_bones_dict[edit_bone.name] = {
-                'matrix': obj_mat @ edit_bone.matrix,
-                'head': obj_mat @ edit_bone.head, 
-                'tail': obj_mat @ edit_bone.tail, 
-                'roll': mat3_to_vec_roll(obj_mat.to_3x3() @ edit_bone.matrix.to_3x3()),
-                'x_axis': (obj_mat @ edit_bone.x_axis.normalized()).normalized()
-                }
+        # NID
+        if x_current_as_init:
+
+            bpy.ops.object.mode_set(mode='POSE')
+
+            for pose_bone in x_target_rig_dupl.pose.bones:
+                tar_bones_dict[pose_bone.name] = {
+                    'matrix': obj_mat @ pose_bone.matrix,
+                    'head': obj_mat @ pose_bone.head, 
+                    'tail': obj_mat @ pose_bone.tail, 
+                    'roll': mat3_to_vec_roll(obj_mat.to_3x3() @ pose_bone.matrix.to_3x3()),
+                    'x_axis': (obj_mat @ pose_bone.x_axis.normalized()).normalized()
+                    }
+        else:
+        # NID END
+            for edit_bone in local_tar_rig.data.edit_bones:
+                tar_bones_dict[edit_bone.name] = {
+                    'matrix': obj_mat @ edit_bone.matrix,
+                    'head': obj_mat @ edit_bone.head, 
+                    'tail': obj_mat @ edit_bone.tail, 
+                    'roll': mat3_to_vec_roll(obj_mat.to_3x3() @ edit_bone.matrix.to_3x3()),
+                    'x_axis': (obj_mat @ edit_bone.x_axis.normalized()).normalized()
+                    }
 
         bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.select_all(action='DESELECT')
@@ -2896,6 +2923,11 @@ def _retarget(self):
                         mat_offset = eb_source_bone.matrix @ mat_rest_diff[eb_source_bone.name]
                         # only use loc rot, scale is buggy if the armature has scale != 1                                       
                         bone_remap.matrix = matrix_loc_rot(mat_offset)
+
+                        # NID
+                        if bone_item.name.find("c_hand_ik.l") >= 0:
+                            print("c_hand_ik.l.bone_remap.matrix:")
+                            print(bone_remap.matrix)
                     else:
                         print("Missing in mat_rest_diff", eb_source_bone.name)
                     
