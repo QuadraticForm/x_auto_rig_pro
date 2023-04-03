@@ -104,6 +104,9 @@ arm_control = [arm_bones_dict['hand']['control_ik'], arm_bones_dict['hand']['con
 
 arm_bendy_dict = {'arm':'arm_bendy', 'forearm':'forearm_bendy'}
 
+arm_props = {'soft_ik': 'arm_softik', 'auto_ik_roll': 'arm_auto_ik_roll'}
+
+
 
 # LEGS
 #   toes
@@ -139,8 +142,8 @@ leg_bones_dict = {
     'upthigh':'c_thigh_b', 
     'thigh': {'base':'thigh', 'fk':'thigh_fk', 'ik':'thigh_ik', 'ik_nostr':'thigh_ik_nostr', 'control_fk':'c_thigh_fk', 'control_ik':'c_thigh_ik', 'twist':'thigh_twist', 'stretch':'thigh_stretch', 'secondary_00':'c_thigh_bend_contact', 'secondary_01':'c_thigh_bend_01', 'secondary_02':'c_thigh_bend_02'}, 
     'calf':{'base':'leg', 'fk':'leg_fk', 'ik':'leg_ik', 'ik_nostr':'leg_ik_nostr', 'control_fk':'c_leg_fk', 'twist':'leg_twist', 'stretch':'leg_stretch', 'secondary_00':'c_knee_bend', 'secondary_01':'c_leg_bend_01', 'secondary_02':'c_leg_bend_02', 'secondary_03':'c_ankle_bend'}, 
-    'foot':{'fk':'foot_fk', 'control_fk':'c_foot_fk', 'snap_fk':'foot_snap_fk', 'ik':'foot_ik', 'ik_target':'foot_ik_target', 'control_ik':'c_foot_ik', 'deform':'foot', 'pole':'foot_pole', 'fk_scale_fix':'c_foot_fk_scale_fix', 'shape_override_fk':'c_p_foot_fk', 'shape_override_ik':'c_p_foot_ik', 'bank_01':'c_foot_bank_01', 'bank_02':'c_foot_bank_02', 'foot_heel':'c_foot_heel', 'control_reverse':'c_foot_01', 'pole_01':'foot_01_pole', 'roll':'c_foot_roll', 'control_roll':'c_foot_roll_cursor', 'secondary_00':'foot_bend'}, 
-    'toes':{'01': 'toes_01', '02': 'toes_02', '01_ik': 'toes_01_ik', 'control_fk': 'c_toes_fk', 'control_ik':'c_toes_ik', 'toes_track': 'c_toes_track', 'toes_end': 'c_toes_end', 'toes_end_01':'c_toes_end_01'}, 
+    'foot':{'fk':'foot_fk', 'control_fk':'c_foot_fk', 'snap_fk':'foot_snap_fk', 'ik':'foot_ik', 'ik_target':'foot_ik_target', 'control_ik':'c_foot_ik', 'deform':'foot', 'pole':'foot_pole', 'fk_scale_fix':'c_foot_fk_scale_fix', 'shape_override_fk':'c_p_foot_fk', 'shape_override_ik':'c_p_foot_ik', 'bank_01':'c_foot_bank_01', 'bank_02':'c_foot_bank_02', 'foot_heel':'c_foot_heel', 'control_reverse':'c_foot_01', 'pole_01':'foot_01_pole', 'roll':'c_foot_roll', 'control_roll':'c_foot_roll_cursor', 'secondary_00':'foot_bend', 'control_ik_offset':'c_foot_ik_offset'}, 
+    'toes':{'01': 'toes_01', '02': 'toes_02', '01_ik': 'toes_01_ik', 'control_fk': 'c_toes_fk', 'control_ik':'c_toes_ik', 'toes_track': 'c_toes_track', 'toes_end': 'c_toes_end', 'toes_end_01':'c_toes_end_01', 'control_pivot':'c_toes_pivot'}, 
     'prepole':'leg_fk_pre_pole', 
     'control_pole_ik':'c_leg_pole',
     'fk_pole':'leg_fk_pole',
@@ -169,9 +172,9 @@ leg_deform = [
     leg_bones_dict['foot']['deform'], leg_bones_dict['toes_pinky1'], leg_bones_dict['toes_pinky2'], leg_bones_dict['toes_pinky3'], leg_bones_dict['toes_ring1'], leg_bones_dict['toes_ring2'], leg_bones_dict['toes_ring3'], leg_bones_dict['toes_middle1'], leg_bones_dict['toes_middle2'], leg_bones_dict['toes_middle3'], leg_bones_dict['toes_index1'], leg_bones_dict['toes_index2'], leg_bones_dict['toes_index3'], leg_bones_dict['toes_thumb1'], leg_bones_dict['toes_thumb2'], leg_bones_dict['toes']['01'], leg_bones_dict['thigh']['twist'], leg_bones_dict['calf']['stretch'], leg_bones_dict['calf']['twist'], leg_bones_dict['thigh']['stretch'], leg_bones_dict['upthigh']]
 
 leg_control = [
-    leg_bones_dict['upthigh'], leg_bones_dict['thigh']['control_fk'], leg_bones_dict['thigh']['control_ik'], leg_bones_dict['calf']['control_fk'], leg_bones_dict['toes_pinky1'], leg_bones_dict['toes_pinky2'], leg_bones_dict['toes_pinky3'], leg_bones_dict['toes_ring1'], leg_bones_dict['toes_ring2'], leg_bones_dict['toes_ring3'], leg_bones_dict['toes_middle1'], leg_bones_dict['toes_middle2'], leg_bones_dict['toes_middle3'], leg_bones_dict['toes_index1'], leg_bones_dict['toes_index2'], leg_bones_dict['toes_index3'], leg_bones_dict['toes_thumb1'], leg_bones_dict['toes_thumb2'], leg_bones_dict['foot']['control_fk'], leg_bones_dict['toes']['control_fk'], leg_bones_dict['control_stretch'], leg_bones_dict['calf']['secondary_03'], leg_bones_dict['calf']['secondary_02'], leg_bones_dict['calf']['secondary_01'], leg_bones_dict['calf']['secondary_00'], leg_bones_dict['thigh']['secondary_02'], leg_bones_dict['thigh']['secondary_01'], leg_bones_dict['thigh']['secondary_00'], leg_bones_dict['control_pin'], leg_bones_dict['foot']['control_ik'], leg_bones_dict['toes']['control_ik'], leg_bones_dict['foot']['control_reverse'], leg_bones_dict['foot']['control_roll'], leg_bones_dict['control_pole_ik']]
+    leg_bones_dict['upthigh'], leg_bones_dict['thigh']['control_fk'], leg_bones_dict['thigh']['control_ik'], leg_bones_dict['calf']['control_fk'], leg_bones_dict['toes_pinky1'], leg_bones_dict['toes_pinky2'], leg_bones_dict['toes_pinky3'], leg_bones_dict['toes_ring1'], leg_bones_dict['toes_ring2'], leg_bones_dict['toes_ring3'], leg_bones_dict['toes_middle1'], leg_bones_dict['toes_middle2'], leg_bones_dict['toes_middle3'], leg_bones_dict['toes_index1'], leg_bones_dict['toes_index2'], leg_bones_dict['toes_index3'], leg_bones_dict['toes_thumb1'], leg_bones_dict['toes_thumb2'], leg_bones_dict['foot']['control_fk'], leg_bones_dict['toes']['control_fk'], leg_bones_dict['control_stretch'], leg_bones_dict['calf']['secondary_03'], leg_bones_dict['calf']['secondary_02'], leg_bones_dict['calf']['secondary_01'], leg_bones_dict['calf']['secondary_00'], leg_bones_dict['thigh']['secondary_02'], leg_bones_dict['thigh']['secondary_01'], leg_bones_dict['thigh']['secondary_00'], leg_bones_dict['control_pin'], leg_bones_dict['foot']['control_ik'], leg_bones_dict['foot']['control_ik_offset'], leg_bones_dict['toes']['control_ik'], leg_bones_dict['foot']['control_reverse'], leg_bones_dict['foot']['control_roll'], leg_bones_dict['control_pole_ik']]
 
-leg_props = {'soft_ik': 'leg_softik'}
+leg_props = {'soft_ik': 'leg_softik', 'auto_ik_roll': 'leg_auto_ik_roll'}
 
 
 # HEAD
@@ -260,6 +263,62 @@ for i in mouth_ref_base:
     else:
         mouth_ref.append(i+'.l')
         mouth_ref.append(i+'.r')
+
+        
+def get_variable_lips(head_side, type='REFERENCE', no_side=False, levels=['top_', 'bot_']):
+    types = [type]    
+    if type == 'ALL':
+        types = ['REFERENCE', 'CONTROLLER', 'CONT_MASTER', 'OFFSET', 'RETAIN', 'FOLLOW']
+    if type == 'NON_REF':
+        types = ['CONTROLLER', 'CONT_MASTER', 'OFFSET', 'RETAIN', 'FOLLOW']
+        
+    lips_list = []
+
+    for subtype in types:
+        for lip_id in range(1,32):
+            for _side in ['.l', '.r']:
+                for lvl in levels:
+                    bname = ''
+                    if subtype == 'REFERENCE':
+                        bname = 'lips_' + lvl + '%02d' % lip_id + '_ref' + head_side[:-2] + _side
+                    elif subtype == 'CONTROLLER':
+                        bname = 'c_lips_' + lvl + '%02d' % lip_id + head_side[:-2] + _side   
+                    elif subtype == 'CONT_MASTER':
+                        bname = 'c_lips_' + lvl + '%02d' % lip_id + '_master' + head_side[:-2] + _side  
+                        if lip_id == 1:                            
+                            bname_0 = 'c_lips_' + lvl + 'master' + head_side[:-2] + '.x'                           
+                            if bpy.context.active_object.data.bones.get(bname_0):                             
+                                if not bname_0 in lips_list:# always append .x even if no_side
+                                    lips_list.append(bname_0)                                    
+                    elif subtype == 'OFFSET':
+                        bname = 'c_lips_' + lvl + '%02d' % lip_id + '_offset' + head_side[:-2] + _side
+                    elif subtype == 'RETAIN':
+                        bname = 'c_lips_' + lvl + '%02d' % lip_id + '_retain' + head_side[:-2] + _side
+                    elif subtype == 'FOLLOW':
+                        bname = 'lips_' + lvl + '%02d' % lip_id + '_retain' + head_side[:-2] + _side
+                    
+                    if bpy.context.active_object.data.bones.get(bname):
+                        if no_side:
+                            bname = bname.replace(head_side[:-2]+_side, '')
+                        lips_list.append(bname)
+            
+    return lips_list
+    
+    
+def get_lip_idx(name):
+    for i in name.split('_'):
+        i = i.split('.')[0]
+        if i.isdigit() and len(i) == 2:
+            return int(i)    
+    return 0# no string idx found, is zero
+    
+    
+def get_eyelid_idx(name):
+    for i in name.split('_'):
+        i = i.split('.')[0]
+        if i.isdigit() and len(i) == 2:
+            return int(i)    
+    return 0# no string idx found, is zero
     
     
 # cheeks
@@ -364,31 +423,28 @@ tongue_bones = [tongue_bones_dict[i]['name'] for i in tongue_bones_dict]
     
     
 # eyes
-eye_bones_ref_dict = {'eye_offset': 'eye_offset_ref', 
-                    'eyelod_top': 'eyelid_top_ref', 
-                    'eyelid_bot': 'eyelid_bot_ref', 
-                    'eyelid_top_01': 'eyelid_top_01_ref', 
-                    'eyelid_top_02': 'eyelid_top_02_ref', 
-                    'eyelid_top_03': 'eyelid_top_03_ref', 
-                    'eyelid_bot_01': 'eyelid_bot_01_ref', 
-                    'eyelid_bot_02': 'eyelid_bot_02_ref', 
-                    'eyelid_bot_03': 'eyelid_bot_03_ref', 
-                    'eyelid_corner_01': 'eyelid_corner_01_ref', 
+eye_bones_ref_dict = {'eye_offset': 'eye_offset_ref',
+                    'eyelod_top': 'eyelid_top_ref',
+                    'eyelid_twk_top': 'eyelid_twk_top_ref',
+                    'eyelid_bot': 'eyelid_bot_ref',
+                    'eyelid_twk_bot': 'eyelid_twk_bot_ref',
+                    'eyelid_top_01': 'eyelid_top_01_ref',
+                    'eyelid_bot_01': 'eyelid_bot_01_ref',
+                    'eyelid_corner_01': 'eyelid_corner_01_ref',
                     'eyelid_corner_02': 'eyelid_corner_02_ref',
                     }
-          
+                    
+                    
 eye_bones_dict = {
                    'eye_ref_track': {'name':'c_eye_ref_track', 'deform':True, 'control':False},
                    'eye_offset': {'name':'c_eye_offset', 'deform':True, 'control':True},
                    'eyelid_base': {'name':'c_eyelid_base', 'deform':False, 'control':False},
                    'eyelid_top': {'name':'eyelid_top', 'deform':False, 'control':False},
-                   'eyelid_top_01': {'name':'c_eyelid_top_01', 'deform':True, 'control':True},
-                   'eyelid_top_02': {'name': 'c_eyelid_top_02', 'deform':True, 'control':True},
-                   'eyelid_top_03': {'name': 'c_eyelid_top_03', 'deform':True, 'control':True},
+                   'eyelid_top_01': {'name':'c_eyelid_top_01', 'deform':True, 'control':True}, 
+                   'eyelid_twk_top': {'name': 'c_eyelid_twk_top', 'deform':True, 'control':True},  
                    'eyelid_bot': {'name': 'eyelid_bot', 'deform':False, 'control':False},
                    'eyelid_bot_01': {'name': 'c_eyelid_bot_01', 'deform':True, 'control':True},
-                   'eyelid_bot_02': {'name': 'c_eyelid_bot_02', 'deform':True, 'control':True},
-                   'eyelid_bot_03': {'name': 'c_eyelid_bot_03', 'deform':True, 'control':True},
+                   'eyelid_twk_bot': {'name': 'c_eyelid_twk_bot', 'deform':True, 'control':True},   
                    'c_eye':  {'name': 'c_eye', 'deform':True, 'control':True},
                    'c_eye_ref': {'name': 'c_eye_ref', 'deform':False, 'control':True},
                    'eyelid_corner_01' : {'name': 'c_eyelid_corner_01', 'deform':True, 'control':True},
@@ -396,14 +452,49 @@ eye_bones_dict = {
                    'c_eyelid_top': {'name': 'c_eyelid_top', 'deform':False, 'control':True},
                    'c_eyelid_bot': {'name': 'c_eyelid_bot', 'deform':False, 'control':True},
                    'c_eye_target': {'name': 'c_eye_target', 'deform':False, 'control':True},
+                   'c_eye_target_mid': {'name': 'c_eye_target.x', 'deform':False, 'control':True}
                    }
-                   
+                    
+                    
+eyelids_bones_ref_default_dict = {'eyelid_top_02': 'eyelid_top_02_ref',
+                            'eyelid_top_03': 'eyelid_top_03_ref',
+                            'eyelid_bot_02': 'eyelid_bot_02_ref',
+                            'eyelid_bot_03': 'eyelid_bot_03_ref'}
+                    
+                    
+def get_variable_eyelids(head_side, eye_sides=['.l', '.r'], type='REFERENCE', levels=['top_', 'bot_'], no_side=False):
+    types = [type]    
+    if type == 'ALL':
+        types = ['REFERENCE', 'CONTROLLER']
+   
+    eyelids_list = []
+
+    for subtype in types:
+        for eyel_id in range(1,32):
+            str_i = '%02d' % eyel_id
+            for _side in eye_sides:
+                for lvl in levels:
+                    bname = ''
+                    if subtype == 'REFERENCE':
+                        bname = 'eyelid_' + lvl + str_i + '_ref' + head_side[:-2] + _side
+                    elif subtype == 'CONTROLLER':
+                        bname = 'c_eyelid_' + lvl + str_i + head_side[:-2] + _side
+                    
+                    if bpy.context.active_object.data.bones.get(bname):
+                        if no_side:
+                            bname = bname.replace(head_side[:-2]+_side, '')
+                        eyelids_list.append(bname)
+            
+    return eyelids_list
+    
+
 eye_bones = [j['name'] for i, j in eye_bones_dict.items()] 
 eye_ref = [j for i, j in eye_bones_ref_dict.items()] 
-    
+eyelids_default_ref = [j for i, j in eyelids_bones_ref_default_dict.items()]
+
 eye_bones_mid = ['c_eye_target.x']
-eye_bones_left = [i+'.l' for i in eye_bones] + [i+'.l' for i in eye_ref]
-eye_bones_right = [i+'.r' for i in eye_bones] + [i+'.r' for i in eye_ref]
+eye_bones_left = [i+'.l' for i in eye_bones] + [i+'.l' for i in eye_ref] + [i+'.l' for i in eyelids_default_ref]
+eye_bones_right = [i+'.r' for i in eye_bones] + [i+'.r' for i in eye_ref] + [i+'.r' for i in eyelids_default_ref]
 
 
 # eyebrows
@@ -464,8 +555,6 @@ teeth_control = [teeth_bones_dict[i]['name'] for i in teeth_bones_dict if teeth_
 tongue_control = [tongue_bones_dict[i]['name'] for i in tongue_bones_dict if tongue_bones_dict[i]['control']]
 
 facial_control = mouth_control + cheek_control + chin_control + nose_control + eye_control + eyebrow_control + teeth_control + tongue_control
-                
-#facial_control = ['c_teeth_top_master.x', 'c_teeth_bot_master.x', mouth_bones_dict['c_teeth_bot_mid'], 'c_teeth_top', 'c_teeth_bot', 'c_teeth_top.x', 'c_tong_03.x', 'c_tong_02.x', 'c_tong_01.x', 'c_cheek_inflate', 'c_nose_03.x', 'c_nose_01.x', 'c_nose_02.x', 'c_eye_offset', 'c_cheek_smile', 'c_chin_01.x', 'c_chin_02.x', 'c_eye', 'c_lips_smile', 'c_lips_top', 'c_lips_top_01', 'c_lips_top.x', 'c_lips_bot', 'c_lips_bot_01', 'c_lips_bot.x', 'c_jawbone.x', 'c_tong_01.x', 'c_tong_02.x', 'c_tong_03.x', 'c_lips_corner_mini', 'c_lips_roll_top.x', 'c_lips_roll_bot.x', 'c_eyelid_top', 'c_eyelid_bot', 'c_eyebrow_full', 'c_eyebrow_03', 'c_eyebrow_02', 'c_eyebrow_01', 'c_eyebrow_01_end', 'c_eye_target.x', 'c_eye_target', 'c_eye_ref', 'c_eyelid_top_01', 'c_eyelid_top_02', 'c_eyelid_top_03', 'c_eyelid_bot_01', 'c_eyelid_bot_02', 'c_eyelid_bot_03', 'c_eyelid_corner_01', 'c_eyelid_corner_02']
 
 facial_bones = eyebrow_bones + eye_bones_mid + eye_bones + nose_bones + chin_bones + cheek_bones_base + mouth_bones_base + teeth_bones_base + tongue_bones
 
@@ -530,10 +619,10 @@ def get_spine_name(type, idx):
         return 'c_spine_'+str_idx+'_bend_proxy'+'.x'
         
         
-def get_spine_idx(name):
-    for i in name.split('_'):
-        if i.isdigit() and len(i) == 2:
-            return int(i)
+def get_spine_idx(name):    
+    for i in name.split('_'):        
+        if i.isdigit() and len(i) == 2:            
+            return int(i)  
             
     return None
         
@@ -542,11 +631,13 @@ spine_bones_dict = {
     'c_root_master': 'c_root_master.x', 'c_root':'c_root.x', 'root':'root.x', 'c_root_bend':'c_root_bend.x', 
     'c_waist_bend':'c_waist_bend.x', 'root_master_shape_override':'c_p_root_master.x', 'root_shape_override':'c_p_root.x', 
     'spine_01_shape_override':get_spine_name('shape_override', 1), 'spine_02_shape_override':get_spine_name('shape_override', 2), 
-    'c_spine_01':get_spine_name('control', 1), 'spine_01':get_spine_name('base', 1), 'c_spine_01_bend':get_spine_name('control_bend', 1), 
-    'c_spine_02':get_spine_name('control', 2), 'spine_02':get_spine_name('base', 2), 'c_spine_02_bend':get_spine_name('control_bend', 2)}
+    'c_spine_01':get_spine_name('control', 1), 'spine_01':get_spine_name('base', 1), 'c_spine_01_bend':get_spine_name('control_bend', 1), 'spine_01_cns': 'spine_01_cns.x', 
+    'c_spine_02':get_spine_name('control', 2), 'spine_02':get_spine_name('base', 2), 'c_spine_02_bend':get_spine_name('control_bend', 2), 'spine_02_cns': 'spine_02_cns.x',
+    'c_spine_master': 'c_spine_master.x', 'stretchy': 'spine_stretchy.x'}
 
 spine_bones = [j for i, j in spine_bones_dict.items()]
 
+spine_03_intern = ['spine_03_cns.x']
 spine03_deform = [get_spine_name('base', 3)]
 spine03_control = [get_spine_name('control', 3), get_spine_name('control_proxy', 3), get_spine_name('control_bend', 3)]
 

@@ -17,11 +17,12 @@
 #
 # ***** END GPL LICENCE BLOCK *****
 
-
+import os, shutil
+    
 bl_info = {
     "name": "Auto-Rig Pro",
     "author": "Artell",
-    "version": (3, 65, 49),
+    "version": (3, 67, 40),
     "blender": (2, 80, 0),
     "location": "3D View > Properties> Auto-Rig Pro",
     "description": "Automatic rig generation based on reference bones and various tools",
@@ -29,28 +30,7 @@ bl_info = {
     "doc_url": "http://lucky3d.fr/auto-rig-pro/doc/",
     "category": "Animation",
     }
-
-if "bpy" in locals():
-    import importlib
-    if "auto_rig_prefs" in locals():
-        importlib.reload(auto_rig_prefs)
-    if "rig_functions" in locals():
-        importlib.reload(rig_functions)
-    if "auto_rig_datas" in locals():
-        importlib.reload(auto_rig_datas)
-    if "auto_rig" in locals():
-        importlib.reload(auto_rig)
-    if "auto_rig_smart" in locals():
-        importlib.reload(auto_rig_smart)
-    if "auto_rig_remap" in locals():
-        importlib.reload(auto_rig_remap)
-    if "auto_rig_ge" in locals():
-        importlib.reload(auto_rig_ge)
-    if "arp_fbx_init" in locals():
-        importlib.reload(arp_fbx_init)
-    if "utils" in locals():
-        importlib.reload(utils)
-
+    
 
 import bpy
 from bpy.app.handlers import persistent
@@ -63,20 +43,93 @@ from . import auto_rig_remap
 from . import auto_rig_ge
 from .export_fbx import arp_fbx_init
 from . import utils
+ 
+
+# gltf export specials 
+class glTF2ExportUserExtension:
+    
+    export_action_only = ''
+    
+    def __init__(self):
+        self.action = None
+
+    def gather_actions_hook(self, blender_object, params, export_settings):        
+        # Filter actions
+        #   Only filter ARP rigs
+        if not 'arp_rig_name' in blender_object:
+            return
+        
+        act_list = []
+        for act in params.blender_actions:
+            if len(act.keys()):
+                if "arp_baked_action" in act.keys(): 
+                    if self.export_action_only == 'all_actions':
+                        act_list.append(act)  
+                    elif self.export_action_only == act.name:
+                        act_list.append(act)
+   
+        params.blender_actions = act_list
+        
+        params.blender_tracks = {k:v for (k, v) in params.blender_tracks.items() if k in [act.name for act in params.blender_actions]}
+        params.action_on_type = {k:v for (k, v) in params.action_on_type.items() if k in [act.name for act in params.blender_actions]}
+
+    def animation_switch_loop_hook(self, blender_object, post, export_settings):
+
+        # Before looping on actions to export
+        # Store used action of original rig
+        if 'arp_rig_name' in blender_object and post is False:
+            original_rig = bpy.data.objects[blender_object['arp_rig_name']]
+            if original_rig.animation_data and original_rig.animation_data.action:
+                self.action = original_rig.animation_data.action
+
+        # Restore initial action of the original rig
+        # After looping on actions to export
+        if 'arp_rig_name' in blender_object and post is True:
+            original_rig = bpy.data.objects[blender_object['arp_rig_name']]
+            if original_rig.animation_data:
+                original_rig.animation_data.action = self.action
+
+            self.action = None
+
+    def post_animation_switch_hook(self, blender_object, blender_action, track_name, on_type, export_settings):
+
+        # When switching the exported rig, also switch the original rig (same action + "_%temp")
+        if 'arp_rig_name' in blender_object:
+            original_rig = bpy.data.objects[blender_object['arp_rig_name']]
+            if original_rig.animation_data:
+                original_rig.animation_data.action = bpy.data.actions[blender_action.name + "_%temp"]
+                
+                
+def menu_func_export(self, context):
+    self.layout.operator(auto_rig_ge.ARP_OT_GE_export_fbx_panel.bl_idname, text="Auto-Rig Pro FBX (.fbx)")
+    if bpy.app.version >= (3, 4, 0):
+        self.layout.operator(auto_rig_ge.ARP_OT_GE_export_gltf_panel.bl_idname, text="Auto-Rig Pro GLTF (.glb/.gltf)")    
     
 
-def menu_func_export(self, context):
-    self.layout.operator(auto_rig_ge.ARP_OT_GE_export_fbx_panel.bl_idname, text="Auto-Rig Pro FBX (.fbx)")   
+def cleanse_modules():
+    """search for your plugin modules in blender python sys.modules and remove them"""
+    #print("Cleanse modules")
+    import sys
+
+    all_modules = sys.modules 
+    all_modules = dict(sorted(all_modules.items(),key= lambda x:x[0])) #sort them
    
-def register():  
+    for k in all_modules:
+        if k.startswith(__name__):
+            #print('  clean', k)
+            del sys.modules[k]
+
+
+def register():
     auto_rig_prefs.register()
     auto_rig.register()
     auto_rig_smart.register()   
     auto_rig_remap.register()
     auto_rig_ge.register()
     rig_functions.register()
-    arp_fbx_init.register() 
-    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)        
+    arp_fbx_init.register()
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)   
+    
 
 def unregister():
     auto_rig_prefs.unregister()
@@ -87,6 +140,7 @@ def unregister():
     rig_functions.unregister()
     arp_fbx_init.unregister()
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)        
+    cleanse_modules()
     
 
 if __name__ == "__main__":

@@ -754,6 +754,45 @@ def fbx_data_bindpose_element(root, me_obj, me, scene_data, arm_obj=None, mat_wo
         elem_data_single_float64_array(fbx_posenode, b"Matrix", matrix4_to_array(bomat))
 
     return mat_world_obj, mat_world_bones
+    
+    
+def fbx_data_bindpose_only(root, scene_data, armature=None, mat_world_armature=None, bones_list=[]):
+    """
+    Helper, since bindpose are used by both meshes shape keys and armature bones...
+    """
+    me_obj = armature
+    me = armature.bdata
+    # We assume bind pose for our bones are their "Editmode" pose...
+    # All matrices are expected in global (world) space.
+    bindpose_key = get_blender_bindpose_key(armature.bdata, me)
+    fbx_pose = elem_data_single_int64(root, b"Pose", get_fbx_uuid_from_key(bindpose_key))
+    fbx_pose.add_string(fbx_name_class(me.name.encode(), b"Pose"))
+    fbx_pose.add_string(b"BindPose")
+
+    elem_data_single_string(fbx_pose, b"Type", b"BindPose")
+    elem_data_single_int32(fbx_pose, b"Version", FBX_POSE_BIND_VERSION)
+    elem_data_single_int32(fbx_pose, b"NbPoseNodes", 1 + (1 if (armature != me_obj) else 0) + len(bones_list))
+
+    # First node is mesh/object.
+    mat_world_obj = me_obj.fbx_object_matrix(scene_data, global_space=True)
+    fbx_posenode = elem_empty(fbx_pose, b"PoseNode")
+    elem_data_single_int64(fbx_posenode, b"Node", me_obj.fbx_uuid)
+    elem_data_single_float64_array(fbx_posenode, b"Matrix", matrix4_to_array(mat_world_obj))
+    # Second node is armature object itself.
+    if armature != me_obj:
+        fbx_posenode = elem_empty(fbx_pose, b"PoseNode")
+        elem_data_single_int64(fbx_posenode, b"Node", armature.fbx_uuid)
+        elem_data_single_float64_array(fbx_posenode, b"Matrix", matrix4_to_array(mat_world_armature))
+    # And all bones of armature!
+    mat_world_bones = {}
+    for bo_obj in bones_list:
+        bomat = bo_obj.fbx_object_matrix(scene_data, rest=True, global_space=True)
+        mat_world_bones[bo_obj] = bomat
+        fbx_posenode = elem_empty(fbx_pose, b"PoseNode")
+        elem_data_single_int64(fbx_posenode, b"Node", bo_obj.fbx_uuid)
+        elem_data_single_float64_array(fbx_posenode, b"Matrix", matrix4_to_array(bomat))
+
+    return mat_world_obj, mat_world_bones
 
 
 def fbx_data_mesh_shapes_elements(root, me_obj, me, scene_data, fbx_me_tmpl, fbx_me_props):
@@ -1569,7 +1608,41 @@ def fbx_data_armature_elements(root, arm_obj, scene_data):
                 elem_data_single_float64_array(fbx_clstr, b"TransformLink", matrix4_to_array(mat_world_bones[bo_obj]))
                 elem_data_single_float64_array(fbx_clstr, b"TransformAssociateModel", matrix4_to_array(mat_world_arm))
 
+    elif bpy.context.scene.arp_ge_force_rest_pose_export:
+        # Auto-Rig Pro implant to export the bind pose when there are no deformers (skeleton only)
+        # warning, UE doesn't import skeleton only. Unity does
+        print("Skeleton only, export bind pose anyway...")
+        mat_world_obj, mat_world_bones = fbx_data_bindpose_only(root, scene_data, armature=arm_obj, mat_world_armature=mat_world_arm, bones_list=bones)
+        '''
+        # Deformer.
+        skin_key = get_blender_armature_skin_key(arm_obj.bdata, None)
+        fbx_skin = elem_data_single_int64(root, b"Deformer", get_fbx_uuid_from_key(skin_key))
+        fbx_skin.add_string(fbx_name_class(arm_obj.name.encode(), b"Deformer"))
+        fbx_skin.add_string(b"Skin")
 
+        elem_data_single_int32(fbx_skin, b"Version", FBX_DEFORMER_SKIN_VERSION)
+        elem_data_single_float64(fbx_skin, b"Link_DeformAcuracy", 50.0)
+        '''
+        clusters = {bo: get_blender_bone_cluster_key(arm_obj.bdata, None, bo.bdata) for bo in bones}
+        
+        for bo_obj, clstr_key in clusters.items():
+            bo = bo_obj.bdata
+            # Create the cluster.
+            fbx_clstr = elem_data_single_int64(root, b"Deformer", get_fbx_uuid_from_key(clstr_key))
+            fbx_clstr.add_string(fbx_name_class(bo.name.encode(), b"SubDeformer"))
+            fbx_clstr.add_string(b"Cluster")
+
+            elem_data_single_int32(fbx_clstr, b"Version", FBX_DEFORMER_CLUSTER_VERSION)
+            # No idea what that user data might be...
+            fbx_userdata = elem_data_single_string(fbx_clstr, b"UserData", b"")
+            fbx_userdata.add_string(b"")         
+         
+            elem_data_single_float64_array(fbx_clstr, b"Transform",
+                                           matrix4_to_array(mat_world_bones[bo_obj].inverted_safe() @ mat_world_obj))
+            elem_data_single_float64_array(fbx_clstr, b"TransformLink", matrix4_to_array(mat_world_bones[bo_obj]))
+            elem_data_single_float64_array(fbx_clstr, b"TransformAssociateModel", matrix4_to_array(mat_world_arm))
+        
+        
 def fbx_data_leaf_bone_elements(root, scene_data):
     # Write a dummy leaf bone that is used by applications to show the length of the last bone in a chain
     for (node_name, _par_uuid, node_uuid, attr_uuid, matrix, hide, size) in scene_data.data_leaf_bones:

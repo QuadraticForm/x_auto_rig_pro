@@ -1734,11 +1734,56 @@ class ARP_OT_leg_ik_to_fk(Operator):
 
 ###FUNCTIONS ##############################################
 # Functions Utils
-def keyframe_pb_transforms(pb):
-    pb.keyframe_insert(data_path='location')                  
-    rot_dp = 'rotation_quaternion' if pb.rotation_mode == 'QUATERNION' else 'rotation_euler'                   
-    pb.keyframe_insert(data_path=rot_dp)
-    pb.keyframe_insert(data_path='scale')
+def _rotate_point(point_loc, angle, axis, origin):
+    # rotate the point_loc (vector 3) around the "axis" (vector 3) 
+    # for the angle value (radians)
+    # around the origin (vector 3)
+    rot_mat = Matrix.Rotation(angle, 4, axis.normalized())
+    loc = point_loc.copy()
+    loc = loc - origin
+    point_mat = Matrix.Translation(loc).to_4x4()
+    point_mat_rotated = rot_mat @ point_mat
+    loc, rot, scale = point_mat_rotated.decompose()
+    loc = loc + origin
+    return loc
+    
+    
+def compensate_ik_pole_position(fk1, fk2, ik1, ik2, pole):
+    angle_offset = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
+    i = 0
+    dir = 1
+    while (angle_offset > 0.005 and i < 6):
+        print('Correcting IK pole snap', i)
+        axis = (ik2.tail-ik1.head)
+        origin = (fk2.tail + fk1.head) / 2
+        pole_rotated = _rotate_point(pole.head, angle_offset*dir, axis, origin)        
+        snap_pos_matrix(pole, Matrix.Translation(pole_rotated))
+        new_angle = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
+        if new_angle > angle_offset:# wrong direction!            
+            dir *= -1
+        angle_offset = new_angle
+        i += 1
+    
+    
+def keyframe_pb_transforms(pb, loc=True, rot=True, scale=True, keyf_locked=False):
+    if loc:
+        for i, j in enumerate(pb.lock_location):
+            if not j or keyf_locked:
+                pb.keyframe_insert(data_path='location', index=i)  
+    if rot:
+        rot_dp = 'rotation_quaternion' if pb.rotation_mode == 'QUATERNION' else 'rotation_euler' 
+        rot_locks = [i for i in pb.lock_rotation]
+        if rot_dp == 'rotation_quaternion':
+            rot_locks.insert(0, pb.lock_rotation_w)
+        for i, j in enumerate(rot_locks):
+            if not j or keyf_locked:
+                pb.keyframe_insert(data_path=rot_dp, index=i)
+        
+    if scale:
+        for i, j in enumerate(pb.lock_scale):
+            if not j or keyf_locked:
+                pb.keyframe_insert(data_path='scale', index=i)
+
     
                     
 def get_pinned_props_list(rig):
@@ -2502,12 +2547,12 @@ def _set_picker_camera(self):
     ui_mesh = None
     char_name_text = None
     
-    is_proxy = False
+    is_a_proxy = False
     if 'proxy_collection' in dir(rig):# proxy support
         if rig.proxy_collection:
-            is_proxy = True
+            is_a_proxy = True
             children = rig.proxy_collection.instance_collection.all_objects
-    if not is_proxy:
+    if not is_a_proxy:
         children = rig.children
 
     for child in children:
@@ -2634,25 +2679,37 @@ def get_ik_pole_pos(b1, b2, dist):
     pole_pos = b2.head + prepole_dir.normalized()
     pole_pos = project_point_onto_plane(pole_pos, b2.head, plane_normal)
     pole_pos = b2.head + ((pole_pos - b2.head).normalized() * (b2.head - b1.head).magnitude * dist)
+    
     return pole_pos
 
 
 def get_pose_matrix_in_other_space(mat, pose_bone):
     rest = pose_bone.bone.matrix_local.copy()
     rest_inv = rest.inverted()
-
+    par_mat = Matrix()
+    par_inv = Matrix()
+    par_rest = Matrix()
+    
+    # bone parent case
     if pose_bone.parent and pose_bone.bone.use_inherit_rotation:
         par_mat = pose_bone.parent.matrix.copy()
         par_inv = par_mat.inverted()
         par_rest = pose_bone.parent.bone.matrix_local.copy()
-
-    else:
-        par_mat = Matrix()
-        par_inv = Matrix()
-        par_rest = Matrix()
+    # bone parent as constraint case
+    elif len(pose_bone.constraints):
+        for cns in pose_bone.constraints:
+            if cns.type != 'ARMATURE':
+                continue
+            for tar in cns.targets:
+                if tar.subtarget != '':
+                    if tar.weight > 0.5:# not ideal, but take the bone as parent if influence is above average
+                        par_bone = get_pose_bone(tar.subtarget)
+                        par_mat = par_bone.matrix.copy()
+                        par_inv = par_mat.inverted()
+                        par_rest = par_bone.bone.matrix_local.copy()
+                        break
 
     smat = rest_inv @ (par_rest @ (par_inv @ mat))
-
 
     return smat
 
@@ -2762,6 +2819,23 @@ def update_transform():
     bpy.ops.transform.rotate(value=0, orient_axis='Z', orient_type='VIEW', orient_matrix=((0.0, 0.0, 0), (0, 0.0, 0.0), (0.0, 0.0, 0.0)), orient_matrix_type='VIEW', mirror=False)
 
     
+def get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole):
+    def signed_angle(vector_u, vector_v, normal):
+        normal = normal.normalized()
+        a = vector_u.angle(vector_v)
+        if vector_u.magnitude != 0.0 and vector_v.magnitude != 0.0:
+            if vector_u.cross(vector_v).angle(normal) < 1:
+                a = -a
+        return a
+    
+    midpoint = (fk2.tail + fk1.head) / 2
+    vec1 = fk2.head - midpoint
+    vec2 = ik2.head - midpoint
+    pole_normal = (ik2.tail - ik1.head).cross(pole.head - ik1.head)
+    angle = signed_angle(vec1, vec2, pole_normal)
+    return angle
+    
+    
 def snap_pos_matrix(pose_bone, target_bone_matrix):
     # Snap a bone to another bone. Supports child of constraints and parent.
 
@@ -2788,7 +2862,6 @@ def snap_pos_matrix(pose_bone, target_bone_matrix):
 
 
 def snap_rot(pose_bone, target_bone):
-
     mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
     set_pose_rotation(pose_bone, mat)
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -2927,31 +3000,22 @@ def fk_to_ik_arm(obj, side):
         hand_ik.keyframe_insert(data_path='["ik_fk_switch"]')
         hand_fk.keyframe_insert(data_path='["stretch_length"]')
         
-        for i, j in enumerate(hand_fk.lock_scale):
-            if not j:
-                hand_fk.keyframe_insert(data_path="scale", index=i) 
-
-        hand_fk.keyframe_insert(data_path="rotation_euler")
-        arm_fk.keyframe_insert(data_path="rotation_euler")
-        forearm_fk.keyframe_insert(data_path="rotation_euler")
+        keyframe_pb_transforms(hand_fk, loc=False)
+        keyframe_pb_transforms(arm_fk, loc=False, scale=False)
+        keyframe_pb_transforms(forearm_fk, loc=False, scale=False)
 
         #ik chain
         hand_ik.keyframe_insert(data_path='["stretch_length"]')
         hand_ik.keyframe_insert(data_path='["auto_stretch"]')
-        hand_ik.keyframe_insert(data_path="location")
-        hand_ik.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(hand_ik.lock_scale):
-            if not j:
-                hand_ik.keyframe_insert(data_path="scale", index=i) 
+        keyframe_pb_transforms(hand_ik)
+        pole.keyframe_insert(data_path='location')
 
-        pole.keyframe_insert(data_path="location")
-
-    # change FK to IK hand selection, if selected
-    if hand_ik.bone.select:
+    # change hand IK to FK selection, if selected
+    if hand_ik.bone.select:    
         hand_fk.bone.select = True
-        hand_ik.bone.select = False
-
+        obj.data.bones.active = hand_fk.bone
+        hand_ik.bone.select = False        
+        
 
 def bake_ik_to_fk_arm(self):
     for f in range(self.frame_start, self.frame_end +1):
@@ -2962,11 +3026,9 @@ def bake_ik_to_fk_arm(self):
 
 
 def ik_to_fk_arm(obj, side):
-
     arm_fk  = obj.pose.bones[fk_arm[0] + side]
     forearm_fk  = obj.pose.bones[fk_arm[1] + side]
-    hand_fk  = obj.pose.bones[fk_arm[2] + side]
-    pole_fk = obj.pose.bones[fk_arm[3] + side]
+    hand_fk  = obj.pose.bones[fk_arm[2] + side]    
 
     arm_ik = obj.pose.bones[ik_arm[0] + side]
     forearm_ik = obj.pose.bones[ik_arm[1] + side]
@@ -2981,7 +3043,7 @@ def ik_to_fk_arm(obj, side):
     hand_ik['stretch_length'] = hand_fk['stretch_length']
 
     # Snap
-        # constraint support
+    #   constraint support
     constraint = None
     bparent_name = ""
     parent_type = ""
@@ -3011,30 +3073,34 @@ def ik_to_fk_arm(obj, side):
     if constraint and valid_constraint:
         if parent_type == "bone":
             bone_parent = bpy.context.object.pose.bones[bparent_name]
-            hand_ik.matrix = bone_parent.matrix_channel.inverted()@hand_fk.matrix
+            hand_ik.matrix = bone_parent.matrix_channel.inverted()@ hand_fk.matrix
         if parent_type == "object":
             bone_parent = bpy.data.objects[bparent_name]
             obj_par = bpy.data.objects[bparent_name]
-            hand_ik.matrix = constraint.inverse_matrix.inverted() @obj_par.matrix_world.inverted() @ hand_fk.matrix
+            hand_ik.matrix = constraint.inverse_matrix.inverted() @ obj_par.matrix_world.inverted() @ hand_fk.matrix
     else:
         hand_ik.matrix = hand_fk.matrix
 
     # Pole target position
     pole_dist = 1.0
-    foot_ref = get_data_bone("foot_ref"+side)
-    if foot_ref:
-        if "ik_pole_distance" in foot_ref.keys():
-            pole_dist = foot_ref["ik_pole_distance"]
+    hand_ref = get_data_bone("hand_ref"+side)
+    if hand_ref:
+        if "ik_pole_distance" in hand_ref.keys():
+            pole_dist = hand_ref["ik_pole_distance"]
 
     pole_pos = get_ik_pole_pos(arm_fk, forearm_fk, pole_dist)
     pole_mat = Matrix.Translation(pole_pos)
     snap_pos_matrix(pole, pole_mat)
-
+    
+    # there may be still an offset angle in case automatic IK roll alignment if disabled
+    # compensate
+    compensate_ik_pole_position(arm_fk, forearm_fk, arm_ik, forearm_ik, pole)
+    
     # switch
     hand_ik['ik_fk_switch'] = 0.0
 
     #update view  
-    bpy.context.view_layer.update()
+    bpy.context.view_layer.update()  
 
      #insert key if autokey enable
     if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
@@ -3042,35 +3108,24 @@ def ik_to_fk_arm(obj, side):
         hand_ik.keyframe_insert(data_path='["ik_fk_switch"]')
         hand_ik.keyframe_insert(data_path='["stretch_length"]')
         hand_ik.keyframe_insert(data_path='["auto_stretch"]')
-        hand_ik.keyframe_insert(data_path="location")
-        hand_ik.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(hand_ik.lock_scale):
-            if not j:
-                hand_ik.keyframe_insert(data_path="scale", index=i)
-
+        keyframe_pb_transforms(hand_ik)
         pole.keyframe_insert(data_path="location")
 
         #ik controller if any
-        if obj.pose.bones.get("c_arm_ik" + side) != None:
-            obj.pose.bones["c_arm_ik" + side].keyframe_insert(data_path="rotation_euler", index=1)
+        if obj.pose.bones.get('c_arm_ik' + side) != None:
+            get_pose_bone('c_arm_ik' + side).keyframe_insert(data_path="rotation_euler", index=1)    
 
         #fk chain
         hand_fk.keyframe_insert(data_path='["stretch_length"]')
-        hand_fk.keyframe_insert(data_path="location")
-        hand_fk.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(hand_fk.lock_scale):
-            if not j:
-                hand_fk.keyframe_insert(data_path="scale", index=i)
-        
-        arm_fk.keyframe_insert(data_path="rotation_euler")
-        forearm_fk.keyframe_insert(data_path="rotation_euler")
+        keyframe_pb_transforms(hand_fk) 
+        keyframe_pb_transforms(arm_fk, loc=False, scale=False)       
+        keyframe_pb_transforms(forearm_fk, loc=False, scale=False)
 
     # change FK to IK hand selection, if selected
     if hand_fk.bone.select:
-        hand_fk.bone.select = False
         hand_ik.bone.select = True
+        obj.data.bones.active = hand_ik.bone
+        hand_fk.bone.select = False
         
     #update hack
     update_transform()
@@ -3150,48 +3205,30 @@ def fk_to_ik_leg(obj, side):
         #fk chain
         foot_ik.keyframe_insert(data_path='["ik_fk_switch"]')
         foot_fk.keyframe_insert(data_path='["stretch_length"]')
-        
-        for i, j in enumerate(foot_fk.lock_scale):
-            if not j:
-                foot_fk.keyframe_insert(data_path="scale", index=i)    
-        
-        foot_fk.keyframe_insert(data_path="rotation_euler")
-        thigh_fk.keyframe_insert(data_path="rotation_euler")
-        leg_fk.keyframe_insert(data_path="rotation_euler")
-        toes_fk.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(toes_fk.lock_scale):
-            if not j:
-                toes_fk.keyframe_insert(data_path="scale", index=i)
+        keyframe_pb_transforms(foot_fk, loc=False)
+        keyframe_pb_transforms(thigh_fk, loc=False, scale=False)
+        keyframe_pb_transforms(leg_fk, loc=False, scale=False)
+        keyframe_pb_transforms(toes_fk, loc=False)
       
         #ik chain
         foot_ik.keyframe_insert(data_path='["stretch_length"]')
         foot_ik.keyframe_insert(data_path='["auto_stretch"]')
-        foot_ik.keyframe_insert(data_path="location")
-        foot_ik.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(foot_ik.lock_scale):
-            if not j:
-                foot_ik.keyframe_insert(data_path="scale", index=i)
+        keyframe_pb_transforms(foot_ik)   
 
-        foot_01.keyframe_insert(data_path="rotation_euler")
-        foot_roll.keyframe_insert(data_path="location")
-        toes_ik.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(toes_ik.lock_scale):
-            if not j:
-                toes_ik.keyframe_insert(data_path="scale", index=i)                
-        
+        foot_01.keyframe_insert(data_path='rotation_euler')
+        foot_roll.keyframe_insert(data_path='location')
+        keyframe_pb_transforms(toes_ik, loc=False)
         pole.keyframe_insert(data_path="location")
 
         #ik angle controller if any
-        if obj.pose.bones.get("c_thigh_ik" + side) != None:
-            obj.pose.bones["c_thigh_ik" + side].keyframe_insert(data_path="rotation_euler", index=1)
+        if get_pose_bone('c_thigh_ik'+side) != None:
+            get_pose_bone('c_thigh_ik'+side).keyframe_insert(data_path='rotation_euler', index=1)
 
     # change IK to FK foot selection, if selected
     if foot_ik.bone.select:
         foot_fk.bone.select = True
-        foot_ik.bone.select = False
+        obj.data.bones.active = foot_fk.bone
+        foot_ik.bone.select = False      
 
 
 def bake_ik_to_fk_leg(self):
@@ -3206,9 +3243,8 @@ def ik_to_fk_leg(rig, side):
     thigh_fk = get_pose_bone(fk_leg[0] + side)
     leg_fk = get_pose_bone(fk_leg[1] + side)
     foot_fk = get_pose_bone(fk_leg[2] + side)
-    toes_fk = get_pose_bone(fk_leg[3] + side)
-    pole_fk = get_pose_bone(fk_leg[4] + side)
-
+    toes_fk = get_pose_bone(fk_leg[3] + side)    
+    
     thigh_ik = get_pose_bone(ik_leg[0] + side)
     leg_ik = get_pose_bone(ik_leg[1] + side)  
     foot_ik = get_pose_bone(ik_leg[2] + side)
@@ -3303,8 +3339,9 @@ def ik_to_fk_leg(rig, side):
 
     pole_pos = get_ik_pole_pos(thigh_fk, leg_fk, pole_dist)
     pole_mat = Matrix.Translation(pole_pos)
-    snap_pos_matrix(pole_ik, pole_mat)
-    
+    snap_pos_matrix(pole_ik, pole_mat)    
+    compensate_ik_pole_position(thigh_fk, leg_fk, thigh_ik, leg_ik, pole_ik)
+        
     #if bpy.context.scene.frame_current == 1:
     #    print(br)
     
@@ -3331,54 +3368,29 @@ def ik_to_fk_leg(rig, side):
         foot_ik.keyframe_insert(data_path='["stretch_length"]')        
         foot_ik.keyframe_insert(data_path='["auto_stretch"]')
         
-        for i, j in enumerate(foot_ik.lock_location):
-            if not j:
-                foot_ik.keyframe_insert(data_path="location", index=i)
-            
-        for i, j in enumerate(foot_ik.lock_rotation):
-            if not j:
-                foot_ik.keyframe_insert(data_path="rotation_euler", index=i)
-        
-        for i, j in enumerate(foot_ik.lock_scale):
-            if not j:
-                foot_ik.keyframe_insert(data_path="scale", index=i)
-
-                
+        keyframe_pb_transforms(foot_ik)                
         foot_01.keyframe_insert(data_path="rotation_euler")
         foot_roll.keyframe_insert(data_path="location")
-        toes_ik.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(toes_ik.lock_scale):
-            if not j:
-                toes_ik.keyframe_insert(data_path="scale", index=i)
-        
+        keyframe_pb_transforms(toes_ik, loc=False)        
         pole_ik.keyframe_insert(data_path="location")
         
         #ik controller if any
-        if get_pose_bone("c_thigh_ik" + side):
-            get_pose_bone("c_thigh_ik" + side).keyframe_insert(data_path="rotation_euler", index=1)
+        if get_pose_bone('c_thigh_ik'+side):            
+            get_pose_bone('c_thigh_ik'+side).keyframe_insert(data_path="rotation_euler", index=1)
 
         #fk chain        
         foot_fk.keyframe_insert(data_path='["stretch_length"]')
-        foot_fk.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(foot_fk.lock_scale):
-            if not j:
-                foot_fk.keyframe_insert(data_path="scale", index=i)
-       
-        thigh_fk.keyframe_insert(data_path="rotation_euler")
-        leg_fk.keyframe_insert(data_path="rotation_euler")
-        toes_fk.keyframe_insert(data_path="rotation_euler")
-        
-        for i, j in enumerate(toes_fk.lock_scale):
-            if not j:
-                toes_fk.keyframe_insert(data_path="scale", index=i)
+        keyframe_pb_transforms(foot_fk, loc=False)
+        keyframe_pb_transforms(thigh_fk, loc=False, scale=False)
+        keyframe_pb_transforms(leg_fk, loc=False, scale=False)
+        keyframe_pb_transforms(toes_fk, loc=False)
        
         
-    # change IK to FK foot selection, if selected
-    if foot_fk.bone.select:
-        foot_fk.bone.select = False
+    # change FK to IK foot selection, if selected
+    if foot_fk.bone.select:        
         foot_ik.bone.select = True
+        rig.data.bones.active = foot_ik.bone
+        foot_fk.bone.select = False        
 
 
 def _arp_snap_pole(ob, side, bone_type):
@@ -3831,7 +3843,14 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
 
         # Get bone side
         bone_side = get_bone_side(selected_bone_name)
-
+        
+        # Spine
+        if is_selected('c_spine_', selected_bone_name, startswith=True):
+            c_root_master_pb = get_pose_bone('c_root_master.x')
+            if c_root_master_pb and 'spine_stretch_volume' in c_root_master_pb.keys():
+                col = layout.column(align=True)
+                col.prop(c_root_master_pb, '["spine_stretch_volume"]', text='Spine Stretch')
+            
        # Leg
         if (is_selected(fk_leg, selected_bone_name) or is_selected(ik_leg, selected_bone_name)):
             
@@ -4073,6 +4092,8 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
         if is_selected("c_spline_", selected_bone_name, startswith=True) or is_selected_prop(active_bone, "arp_spline"):
             layout.label(text="Spline IK")
             spline_name = selected_bone_name.split('_')[1]
+            if active_bone.bone.keys() and "arp_spline" in active_bone.bone.keys():
+                spline_name = active_bone.bone['arp_spline']
 
             if len(active_bone.keys()):
                 if "twist" in active_bone.keys():

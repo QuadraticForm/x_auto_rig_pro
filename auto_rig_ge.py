@@ -17,18 +17,24 @@ fingers_deform = ["thumb1", "c_thumb2", "c_thumb3", 'c_index1_base', "index1", "
 
 fingers_names = ["pinky", "ring", "index", "middle", "thumb"]
 
-bend_bones = ['c_ankle_bend', 'c_leg_bend_02', 'c_leg_bend_01', 'c_knee_bend', 'c_thigh_bend_02', 'c_thigh_bend_01', 'c_thigh_bend_contact', 'c_waist_bend.x', 'c_root_bend.x', 'c_spine_01_bend.x', 'c_spine_02_bend.x', 'c_shoulder_bend', 'c_arm_bend', 'c_elbow_bend', 'c_forearm_bend', 'c_wrist_bend', 'c_bot_bend', 'c_neck_01.x']
+bend_bones = ['c_ankle_bend', 'c_leg_bend_02', 'c_leg_bend_01', 'c_knee_bend', 'c_thigh_bend_02', 'c_thigh_bend_01', 'c_thigh_bend_contact', 
+            'c_waist_bend.x', 'c_root_bend.x', 
+            'c_shoulder_bend', 'c_arm_bend', 'c_elbow_bend', 'c_forearm_bend', 'c_wrist_bend', 
+            'c_bot_bend', 'c_neck_01.x']
 
 bend_bones_spine_only = ['c_waist_bend.x', 'c_root_bend.x', 'c_bot_bend', 'c_neck_01.x']
+
 for i in range(1, 33):
     str_idx = '%02d' % i
+    bend_bones.append('c_spine_'+str_idx+'_bend.x')
     bend_bones_spine_only.append('c_spine_'+str_idx+'_bend.x')
+    
 
 bend_bones_add = ['c_ankle_bend', 'c_leg_bend_02', 'c_leg_bend_01', 'c_knee_bend', 'c_thigh_bend_02', 'c_thigh_bend_01', 'c_thigh_bend_contact', 'c_waist_bend.x', 'c_shoulder_bend', 'c_arm_bend', 'c_elbow_bend', 'c_forearm_bend', 'c_wrist_bend']
 
 default_facial_bones = ['c_eyebrow_full', 'c_eyebrow_01_end', 'c_eyebrow_01', 'c_eyebrow_02', 'c_eyebrow_03', 'c_eye', 'c_eye_offset', 'eyelid_bot', 'eyelid_top', 'jawbone.x', 'c_lips_smile', 'c_eye_target']
 
-additional_facial_bones = ['c_teeth_bot', 'c_teeth_top', 'c_lips_bot', 'c_lips_bot_01', 'c_lips_top', 'c_lips_top_01', 'c_chin_01', 'c_chin_02', 'c_cheek_smile', 'c_nose_03', 'c_nose_01', 'c_nose_02', 'c_cheek_inflate', 'c_eye_ref_track', 'tong_03', 'tong_02', 'tong_01', 'c_skull_01', 'c_skull_02', 'c_skull_03', 'c_eyelid_top_01', 'c_eyelid_top_02', 'c_eyelid_top_03', 'c_eyelid_bot_01', 'c_eyelid_bot_02', 'c_eyelid_bot_03', 'c_eyelid_corner_01', 'c_eyelid_corner_02']
+additional_facial_bones = ['c_teeth_bot', 'c_teeth_top', 'c_lips_bot', 'c_lips_bot_01', 'c_lips_top', 'c_lips_top_01', 'c_chin_01', 'c_chin_02', 'c_cheek_smile', 'c_nose_03', 'c_nose_01', 'c_nose_02', 'c_cheek_inflate', 'c_eye_ref_track', 'tong_03', 'tong_02', 'tong_01', 'c_skull_01', 'c_skull_02', 'c_skull_03', 'c_eyelid_top_01', 'c_eyelid_top_02', 'c_eyelid_top_03', 'c_eyelid_bot_01', 'c_eyelid_bot_02', 'c_eyelid_bot_03', 'c_eyelid_corner_01', 'c_eyelid_corner_02', 'c_eyelid_twk_top', 'c_eyelid_twk_bot']
 
 facial_transfer_jaw = ["c_lips_bot_01", "c_lips_bot", "c_teeth_bot", "c_chin_01", "c_chin_02", "tong_03", "tong_01", "tong_02"]
 facial_transfer_head = [i for i in additional_facial_bones if not (i in facial_transfer_jaw or 'eyelid' in i)]
@@ -135,6 +141,32 @@ class ARP_UL_actions_list(UIList):
 
     def invoke(self, context, event):
         pass
+        
+        
+class ARP_OT_GE_show_retro(Operator):
+    """Show backward-compatibility options"""
+
+    bl_idname = "arp.show_retro_options_ge"
+    bl_label = "Backward-compatibility options:"
+    bl_options = {'UNDO'}
+
+    def draw(self, context):
+        scn = context.scene
+        layout = self.layout    
+        layout.prop(scn, "arp_retro_axes", text="Export: Old Arms-Feet Orientation")
+        layout.prop(scn, "arp_retro_action_prefix", text="Export: Actions Prefix")
+        layout.prop(scn, "arp_retro_export_soft_fix", text="Export: Soft-Link Old Thigh/Arms Positions")
+        layout.prop(scn, "arp_retro_ge_mesh", text="Export: Duplicate mesh data names (.001)")
+        layout.prop(scn, "arp_retro_ge_UE_twist_pos", text="Export: Old UE humanoid twist bones position")
+        
+
+    def invoke(self, context, event):
+        # Open dialog
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+
+    def execute(self, context):
+        return {'FINISHED'}
 
 
 class ARP_OT_GE_unset_softlink_bones(Operator):
@@ -242,10 +274,10 @@ class ARP_OT_GE_fix_rig(Operator):
 
     def execute(self, context):
         _fix_rig(self)
-
-        auto_rig.ARP_OT_report_message.message = "Rig fixed! Warning, the following operations were applied:\n-Disabled all possible arms and legs stretches\n-Disabled Preserve Volume on skinned meshes\nThis may somehow change the result, it's recommended to check\nthat animations still look good in the scene, correct them if necessary."
-        auto_rig.ARP_OT_report_message.icon_type = 'INFO'
-        bpy.ops.arp.report_message('INVOKE_DEFAULT')
+        
+        bpy.ops.arp.report_message('INVOKE_DEFAULT',
+                                    message="Rig fixed! Warning, the following operations were applied:\n-Disabled all possible arms and legs stretches\n-Disabled Preserve Volume on skinned meshes\nThis may somehow change the result, it's recommended to check\nthat animations still look good in the scene, correct them if necessary.",
+                                    icon_type = 'INFO')
 
         return {'FINISHED'}
 
@@ -321,13 +353,9 @@ class ARP_OT_GE_check_rig(Operator):
 
 
         if len(self.message_final):
-            auto_rig.ARP_OT_report_message.message = self.message_final
-            auto_rig.ARP_OT_report_message.icon_type = 'ERROR'
-            bpy.ops.arp.report_message('INVOKE_DEFAULT')
-        else:
-            auto_rig.ARP_OT_report_message.message = "Passed! No issues found, ready to export."
-            auto_rig.ARP_OT_report_message.icon_type = 'INFO'
-            bpy.ops.arp.report_message('INVOKE_DEFAULT')
+            bpy.ops.arp.report_message('INVOKE_DEFAULT', message=self.message_final, icon_type='ERROR')
+        else:      
+            bpy.ops.arp.report_message('INVOKE_DEFAULT', message="Passed! No issues found, ready to export.", icon_type='INFO')
 
 
         return {'FINISHED'}
@@ -405,7 +433,7 @@ class ARP_OT_set_mped_rig(Operator):
     @classmethod
     def poll(cls, context):
         if context.active_object:
-            return context.active_object.type == "ARMATURE"
+            return is_arp_armature(context.active_object)
 
     def execute(self, context):
         self.multiple_twist_bones = False
@@ -448,11 +476,20 @@ class ARP_OT_set_mped_rig(Operator):
 
         try:
             scn = context.scene
+            # save current weights for restoration later
+            _save_mesh_weights(rig_name)
+            
+            # set mped
             _set_mped_rig(rig_name, rig_add_name, True, self)
             
             # custom renaming
             if scn.arp_export_renaming:
                 rename_custom(self)
+                
+            # select arp armature
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.select_all(action='DESELECT')
+            set_active_object(arm.name)
 
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
@@ -461,8 +498,7 @@ class ARP_OT_set_mped_rig(Operator):
 
 
 class ARP_OT_set_humanoid_rig(Operator):
-    #tooltip
-    """Create and set the humanoid armature as the deforming armature"""
+    """Create and set the humanoid armature as the deforming armature\nWarning, breaks Auto-Rig Pro editing and export tools, use with care"""
 
     bl_idname = "id.set_humanoid_rig"
     bl_label = "set_humanoid_rig"
@@ -519,6 +555,10 @@ class ARP_OT_set_humanoid_rig(Operator):
         context.preferences.edit.use_global_undo = False
 
         try:
+            # save current weights for restoration later
+            _save_mesh_weights(rig_name)
+            
+            # set humanoid
             _set_humanoid_rig(rig_name, _rig_add_name, True, self)
             
             # custom renaming
@@ -538,6 +578,12 @@ class ARP_OT_set_humanoid_rig(Operator):
                     
             # custom export script
             _run_custom_export_script()
+            
+            # select arp armature
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.select_all(action='DESELECT')
+            set_active_object(self.armature_name)
+            
 
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
@@ -545,65 +591,35 @@ class ARP_OT_set_humanoid_rig(Operator):
         return {'FINISHED'}
 
 
-######### FOR RETRO COMPATIBILITY ONLY#########
-class ARP_OT_unset_humanoid_rig(Operator):
-    #tooltip
-    """Unset the Humanoid armature"""
+class ARP_OT_unset_export_rig(Operator):
+    """Unset the export armature"""
 
-    bl_idname = "id.unset_humanoid_rig"
-    bl_label = "unset_humanoid_rig"
+    bl_idname = "id.unset_export_rig"
+    bl_label = "unset_export_rig"
     bl_options = {'UNDO'}
-
+    
     @classmethod
     def poll(cls, context):
         if context.active_object:
-            if get_object("rig_humanoid"):
+            if 'arp_export_rig_set' in context.active_object.keys():
                 return True
-            else:
-                return False
-
+        return False
+        
+    
     def execute(self, context):
-        if get_object("rig_humanoid") == None:
-            self.report({'ERROR'}, "The Humanoid armature has not been set yet.")
+        arp_armature_name = bpy.context.active_object.name
+        humanoid_name = bpy.context.active_object['arp_export_rig_set']
+        
+        if get_object(humanoid_name) == None:
+            self.report({'ERROR'}, "The Humanoid armature has not been set")
+            del context.active_object['arp_export_rig_set']
             return{'FINISHED'}
-
-        if get_object("rig") == None:
-            self.report({'ERROR'}, "The Humanoid armature has not been set yet.")
-            return{'FINISHED'}
-
+      
         use_global_undo = context.preferences.edit.use_global_undo
         context.preferences.edit.use_global_undo = False
 
         try:
-            #save current mode
-            current_mode = context.mode
-            bpy.ops.object.mode_set(mode='OBJECT')
-            current_obj = bpy.context.active_object
-            current_frame = bpy.context.scene.frame_current#save current frame
-
-            _unset_humanoid_rig(self, context)
-
-            try:
-                #restore current frame
-                bpy.context.scene.frame_current = current_frame
-                bpy.context.scene.frame_set(bpy.context.scene.frame_current)#debug
-            except:
-                pass
-
-            try:
-                #restore object
-                bpy.ops.object.mode_set(mode='OBJECT')
-                set_active_object(current_obj.name)
-                bpy.ops.object.mode_set(mode=current_mode)
-            except:
-                try:
-                    set_active_object("rig")
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                except:
-                    print("Could not set rig object")
-
-            self.report({'INFO'}, "Done.")
-
+            _unset_export_rig(arp_armature_name, humanoid_name)
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
 
@@ -614,10 +630,13 @@ limb_sides = auto_rig.Limb_Sides()
 
 
 def check_multiple_twist_bones(self):
-    work_on_editable_proxy = False
-    armature_name = bpy.context.active_object.name
+    
+    '''# Disable localization for now, we can access prop on bone data from object mode, no need to localize
+    work_on_editable_proxy = False   
     armature = bpy.context.active_object
-
+    arm_name = armature.name
+    sel_objs_names = [i.name for i in bpy.context.selected_objects]
+    
     if self.armature_proxy_name:
         # make proxy armature editable. Create temporary armature copy
         work_on_editable_proxy = True
@@ -625,6 +644,7 @@ def check_multiple_twist_bones(self):
         armature_copy.data = armature.data.copy()
         armature_copy.name = "ARP_EDITABLE_ARMATURE"
         bpy.context.scene.collection.objects.link(armature_copy)
+        bpy.ops.object.select_all(action='DESELECT')
         set_active_object("ARP_EDITABLE_ARMATURE")
 
     work_on_editable_override = False
@@ -634,14 +654,16 @@ def check_multiple_twist_bones(self):
         armature_copy = armature.copy()
         armature_copy.name = "ARP_EDITABLE_ARMATURE"
         bpy.context.scene.collection.objects.link(armature_copy)
+        bpy.ops.object.select_all(action='DESELECT')
         set_active_object("ARP_EDITABLE_ARMATURE")
         bpy.ops.object.make_local(type='SELECT_OBDATA')
-
-    bpy.ops.object.mode_set(mode='EDIT')
+    '''
+    
+    bpy.ops.object.mode_set(mode='OBJECT')
 
     if len(limb_sides.arm_sides) > 0:
         for arm_side in limb_sides.arm_sides:
-            arm_ref = get_edit_bone('arm_ref'+arm_side)
+            arm_ref = get_data_bone('arm_ref'+arm_side)
             if len(arm_ref.keys()) > 0:
                 if 'twist_bones_amount' in arm_ref.keys():
                     if arm_ref["twist_bones_amount"] > 1:
@@ -649,86 +671,32 @@ def check_multiple_twist_bones(self):
 
     if len(limb_sides.leg_sides) > 0 and self.multiple_twist_bones == False:
         for leg_side in limb_sides.leg_sides:
-            thigh_ref = get_edit_bone('thigh_ref'+leg_side)
+            thigh_ref = get_data_bone('thigh_ref'+leg_side)
             if len(thigh_ref.keys()) > 0:
                 if 'twist_bones_amount' in thigh_ref.keys():
                     if thigh_ref["twist_bones_amount"] > 1:
                         self.multiple_twist_bones = True
-
+                        
+    '''# disable for now, see above
     if work_on_editable_proxy or work_on_editable_override:
         # delete temporary armature copy data
         bpy.ops.object.mode_set(mode='OBJECT')
         armature_local = get_object("ARP_EDITABLE_ARMATURE")
         bpy.data.objects.remove(armature_local, do_unlink = True)
-        set_active_object(armature_name)
-
-"""
-def collect_custom_bones(armature_name):
-    arm = get_object(armature_name)
-    global custom_bones_list
-    global softlink_bones
-
-    custom_bones_list = []# global var, must be cleared first
-    softlink_bones = []
-
-    def add_stretch_bones(b):
-        # the main stretch arm/leg bones must be added as well in case
-        # of Humanoid export and Secondary Controllers set to Twist
-        for f in ["arm", "forearm", "thigh", "leg"]:
-            s = get_bone_side(b.name)
-            if b.name == "c_"+f+"_stretch"+s:
-                softlink_bones.append(f+"_stretch"+s)
-
-    # collect props in Edit/Object mode
-    for b in arm.data.bones:
-        found_bone = False
-        if len(b.keys()):
-            if "custom_bone" in b.keys() or "cc" in b.keys():
-                found_bone = True
-
-            if "softlink" in b.keys():
-                if not b.name in softlink_bones:
-                    softlink_bones.append(b.name)
-                    add_stretch_bones(b)
-
-        if b.name.startswith("cc_"):
-            found_bone = True
-        if found_bone and not b.name in custom_bones_list:
-            custom_bones_list.append(b.name)
-
-
-    if "b" in locals():
-        del b
-
-    # also collect props in Pose Mode
-    set_active_object(armature_name)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.select_all(action='DESELECT')
-    set_active_object(armature_name)
-    bpy.ops.object.mode_set(mode='POSE')
-
-    for b in arm.pose.bones:
-        if len(b.keys()) > 0:
-            if "custom_bone" in b.keys() or "cc" in b.keys():
-                if not b.name in custom_bones_list:
-                    custom_bones_list.append(b.name)
-
-            if "softlink" in b.keys():
-                if not b.name in softlink_bones:
-                    softlink_bones.append(b.name)
-                    add_stretch_bones(b)
-
-    # end collect_custom_bones()
-"""
+        # restore selection
+        for obj_name in sel_objs_names:
+            set_active_object(obj_name)
+        set_active_object(arm_name)
+    '''    
 
 class ARP_OT_export_fbx(Operator):
     """Export character in .fbx file format"""
     bl_idname = "id.export_fbx"
     bl_label = "Export .FBX"
-
+    
     def execute(self, context):
         print("")
-
+        
         # variables saving changed parameters values, to be restored after export
         self.units_before_export = context.scene.unit_settings.scale_length
         self.arm_scale = None
@@ -740,7 +708,8 @@ class ARP_OT_export_fbx(Operator):
         self.saved_collection_vis = [i.hide_viewport for i in bpy.data.collections]
         self.saved_unit_type = context.scene.unit_settings.system
         self.current_selection = None
-
+        self.NLA_tweak_state = False
+        
         self.armature_name = ""
         self.armature_add_name = ""
         self.armature_proxy_name = None
@@ -756,10 +725,14 @@ class ARP_OT_export_fbx(Operator):
         self.multiple_twist_bones = False
         self.selected_bone_names = []
         proxy_picker_value = None
-        armature_base_name = ""
+        armature_base_name = ""        
 
         try:
             scn = bpy.context.scene
+            
+            # store file path
+            scn.arp_ge_fp = self.filepath
+            
             # Store current frame
             current_frame_saved = scn.frame_current
 
@@ -919,7 +892,8 @@ class ARP_OT_export_fbx(Operator):
                     return {'FINISHED'}
 
             # Is the NLA in tweak mode?
-            nla_check()
+            #   save current layout            
+            self.NLA_tweak_state = nla_exit_tweak()
 
             print("\n..............................Starting ARP FBX Export..............................")
 
@@ -938,8 +912,8 @@ class ARP_OT_export_fbx(Operator):
                             is_cs_collection = True
                             break
                 if not is_cs_collection:
-                    col.hide_viewport = False
-
+                    col.hide_viewport = False            
+            
             # Create copy objects
             create_copies(self)
 
@@ -970,6 +944,7 @@ class ARP_OT_export_fbx(Operator):
 
 
             def initialize_fbx_armature_rotation(root_armature_name):
+                print("\nApply armature rotation...")
                 root_armature = get_object(root_armature_name)
                 obj_list = [i for i in bpy.context.selected_objects]
 
@@ -1036,6 +1011,7 @@ class ARP_OT_export_fbx(Operator):
 
                 # apply meshes rotation
                 if scn.arp_init_fbx_rot_mesh:
+                    print("  Apply meshes rotations...")
                     bpy.ops.object.mode_set(mode='OBJECT')
                     bpy.ops.object.select_all(action='DESELECT')
 
@@ -1099,32 +1075,34 @@ class ARP_OT_export_fbx(Operator):
                 # Bake Actions?
                 if scn.arp_bake_anim and len(bpy.data.actions):
                     _bake_all(self.armature_name, "rig_humanoid", self)                    
-                else:
-                    print("Bake pose")
+                else:                    
                     _bake_pose("rig_humanoid")
 
                 # x100 units?
-                if scn.arp_units_x100:
-                    _set_units_x100_baked(self.armature_name, self)
+                if (scn.arp_export_bake_axis_convert == False and scn.arp_engine_type == 'unity' and self.export_format == 'FBX') or scn.arp_engine_type == 'unreal' or self.export_format == 'GLTF':
+                    if (scn.arp_units_x100 and self.export_format == 'FBX') or (scn.arp_ge_gltf_unitsx100 and self.export_format == 'GLTF'):
+                        _set_units_x100_baked(self.armature_name, self)
 
                 # Parent the meshes to the humanoid rig
                 parent_meshes_to_baked_armature(self, "rig_humanoid")
 
                 # Initialize Fbx armature rotation?
-                if scn.arp_init_fbx_rot:
-                    initialize_fbx_armature_rotation("rig_humanoid")
+                if (scn.arp_export_bake_axis_convert == False and scn.arp_engine_type == 'unity' and self.export_format == 'FBX') or scn.arp_engine_type == 'unreal':
+                    if scn.arp_init_fbx_rot:
+                        initialize_fbx_armature_rotation("rig_humanoid")
 
                 # Select objects to export
                 _select_exportable(self.armature_name)
 
                 # Rename "rig_humanoid" to def name
-                    # avoid name clashing
+                #   avoid name clashing
                 for obj in bpy.data.objects:
                     if obj.name == scn.arp_export_rig_name:
                         obj.name = scn.arp_export_rig_name + "_temp"
 
                 rig_humanoid = get_object("rig_humanoid")
                 rig_humanoid.name = scn.arp_export_rig_name
+                rig_humanoid['arp_rig_name'] = self.armature_name+'_arpbaseobject'
 
             # M-Ped Export?
             if scn.arp_export_rig_type == "mped":
@@ -1149,15 +1127,17 @@ class ARP_OT_export_fbx(Operator):
                     _bake_pose("rig_mped")
 
                 # x100 units?
-                if scn.arp_units_x100:
-                    _set_units_x100_baked(self.armature_name, self)
-
+                if (scn.arp_export_bake_axis_convert == False and scn.arp_engine_type == 'unity' and self.export_format == 'FBX') or scn.arp_engine_type == 'unreal' or self.export_format == 'GLTF':
+                    if (scn.arp_units_x100 and self.export_format == 'FBX') or (scn.arp_ge_gltf_unitsx100 and self.export_format == 'GLTF'):
+                        _set_units_x100_baked(self.armature_name, self)
+                
                 # Parent the meshes to the mped rig
                 parent_meshes_to_baked_armature(self, "rig_mped")
 
                 # Initialize Fbx armature rotation?
-                if scn.arp_init_fbx_rot:
-                    initialize_fbx_armature_rotation("rig_mped")
+                if (scn.arp_export_bake_axis_convert == False and scn.arp_engine_type == 'unity' and self.export_format == 'FBX') or scn.arp_engine_type == 'unreal':
+                    if scn.arp_init_fbx_rot:
+                        initialize_fbx_armature_rotation("rig_mped")
 
                 # Select objects to export
                 _select_exportable(self.armature_name)
@@ -1170,6 +1150,7 @@ class ARP_OT_export_fbx(Operator):
 
                 rig_mped = get_object("rig_mped")
                 rig_mped.name = scn.arp_export_rig_name
+                rig_mped['arp_rig_name'] = self.armature_name+'_arpbaseobject'
 
             # Rename to right names before export
             print("  Renaming to def names...")
@@ -1192,16 +1173,28 @@ class ARP_OT_export_fbx(Operator):
                             
                             # arpexport
                             obj.data.name = base_data_name
-           
-            # Export Fbx
+            
+            # Export file
             #   support of multiple files export, one per action
             export_ids = ['all_actions']
 
             if scn.arp_bake_type == 'ACTIONS' and scn.arp_export_separate_fbx and scn.arp_bake_anim:
                 export_ids = [act.name for act in bpy.data.actions if is_action_exportable(act)]
-
+            
+            # Unity's bake axis conversion settings
+            _apply_scale = 'FBX_SCALE_NONE'
+            _axis_fwd = '-Z'
+            _axis_up = 'Y'
+            _use_st = True
+            if (scn.arp_export_bake_axis_convert and scn.arp_engine_type == 'unity' and self.export_format == 'FBX'):
+                print('\n  Apply Bake Axis Conversion settings...')
+                _apply_scale = 'FBX_SCALE_ALL'
+                _axis_fwd = '-Y'
+                _axis_up = 'Z'            
+                _use_st = False
+            
             for export_id in export_ids:
-                print("\n..............................FBX Export " + "[" + export_id + "]..............................")
+                print("\n.............................."+self.export_format+" Export " + "[" + export_id + "]..............................")
 
                 def_fp = self.filepath
                 if export_id != 'all_actions':
@@ -1210,10 +1203,35 @@ class ARP_OT_export_fbx(Operator):
                         def_fp = os.path.join(dir_path, export_id + ".fbx")
                     else:
                         def_fp = self.filepath[:-4] + scn.arp_export_file_separator + export_id + ".fbx"
-
-                bpy.ops.arp_export_scene.fbx(filepath=def_fp, use_selection=True, global_scale=scn.arp_global_scale, use_mesh_modifiers=True, use_armature_deform_only=True, add_leaf_bones=False, apply_unit_scale=True, bake_anim_simplify_factor=scn.arp_simplify_fac, mesh_smooth_type=scn.arp_mesh_smooth_type, use_tspace=scn.arp_use_tspace, primary_bone_axis=scn.arp_bone_axis_primary_export, secondary_bone_axis=scn.arp_bone_axis_secondary_export, shape_keys_baked_data=str(self.shape_keys_data), use_subsurf=False, use_custom_props=True, path_mode='COPY' if scn.arp_export_tex else 'AUTO', embed_textures=scn.arp_export_tex, export_action_only=export_id)
-
-            
+                
+                if self.export_format == 'FBX':
+                    bpy.ops.arp_export_scene.fbx(filepath=def_fp, use_selection=True, 
+                    global_scale=scn.arp_global_scale, apply_unit_scale=True, apply_scale_options=_apply_scale,
+                    axis_forward=_axis_fwd, axis_up=_axis_up, use_space_transform=_use_st,
+                    use_mesh_modifiers=scn.arp_apply_mods, use_subsurf=False, mesh_smooth_type=scn.arp_mesh_smooth_type,
+                    use_armature_deform_only=True, add_leaf_bones=False, primary_bone_axis=scn.arp_bone_axis_primary_export, 
+                    secondary_bone_axis=scn.arp_bone_axis_secondary_export,
+                    use_tspace=scn.arp_use_tspace,
+                    bake_anim_simplify_factor=scn.arp_simplify_fac,                    
+                    shape_keys_baked_data=str(self.shape_keys_data), 
+                    use_custom_props=True, 
+                    path_mode='COPY' if scn.arp_export_tex else 'AUTO', embed_textures=scn.arp_export_tex, export_action_only=export_id,
+                    )
+                    
+                elif self.export_format == 'GLTF':
+                    from . import glTF2ExportUserExtension
+                    glTF2ExportUserExtension.export_action_only = export_id
+                    def_fp = def_fp[:-4]# .FBX > .GLTF
+                    bpy.ops.export_scene.gltf(filepath=def_fp, use_selection=True, export_format=scn.arp_ge_gltf_format,
+                    export_apply=scn.arp_apply_mods,# mesh modifiers
+                    export_texcoords=True, export_normals=True, export_colors=True, 
+                    export_animations=True, export_anim_single_armature=True, export_frame_range=True, 
+                    export_force_sampling=True, export_nla_strips=True if scn.arp_bake_type == 'ACTIONS' else False, 
+                    export_optimize_animation_size=False, export_reset_pose_bones=True, export_current_frame=False,
+                    export_morph=True, export_morph_normal=scn.arp_ge_gltf_sk_normals, export_morph_tangent=scn.arp_ge_gltf_sk_tangents,
+                    export_skins=True, export_all_influences=scn.arp_ge_gltf_all_inf, export_def_bones=True, 
+                    export_image_format='AUTO' if scn.arp_export_tex else 'NONE', export_tangents=scn.arp_use_tspace, export_yup=True, export_attributes=True, export_materials='EXPORT')
+        
         #finally:
         #   pass
         
@@ -1384,8 +1402,11 @@ class ARP_OT_export_fbx(Operator):
             # Restore selection
             set_active_object(self.current_selection[0])
             for i in self.current_selection[1]:
-                get_object(i).select_set(True)
-
+                get_object(i).select_set(True)                
+            
+            # Restore NLA tweak mode
+            nla_restore_tweak(self.NLA_tweak_state)               
+            
             bpy.context.evaluated_depsgraph_get().update()
 
             # Workaround to fix the update issue (mesh is kind of frozen, jiggle) with proxy armatures
@@ -1397,7 +1418,7 @@ class ARP_OT_export_fbx(Operator):
                 hide_object(base_arm_proxy)
                 bpy.context.evaluated_depsgraph_get().update()
                 unhide_object(base_arm_proxy)
-            print("\nARP FBX Export Done!")
+            print("\nARP" + self.export_format + " Export Done!")
         
         # Warning message
         if len(self.non_armature_actions) > 0:
@@ -1405,11 +1426,8 @@ class ARP_OT_export_fbx(Operator):
             for act_name in self.non_armature_actions:
                 self.message_final += '\n-' + act_name
             self.message_final += '\nMay corrupt character animation!\nCheck "Only Containing" to export only the armature action name.'
-
-            print(self.message_final)
-            auto_rig.ARP_OT_report_message.message = self.message_final
-            auto_rig.ARP_OT_report_message.icon_type = 'ERROR'
-            bpy.ops.arp.report_message('INVOKE_DEFAULT')
+            
+            bpy.ops.arp.report_message('INVOKE_DEFAULT', message=self.message_final, icon_type='ERROR')
         else:
             self.report({'INFO'}, 'Character Exported')
 
@@ -1613,20 +1631,6 @@ def disable_proxy_picker():
     return proxy_picker_value
 
 
-def nla_check():
-    if bpy.context.scene.is_nla_tweakmode:
-        # try to find the NLA context window for context override
-        win = bpy.context.window
-        scr = win.screen
-        areas3d = [area for area in scr.areas if area.type == 'NLA_EDITOR']
-        if len(areas3d) > 0:
-            region   = [region for region in areas3d[0].regions if region.type == 'WINDOW']
-            override = {'window':win, 'screen':scr,'area'  :areas3d[0],'region':region,'scene' :bpy.context.scene}
-
-            # exit tweak mode
-            bpy.ops.nla.tweakmode_exit(override)
-
-
 def check_humanoid_limbs():
     # check if the rig limbs are set up as a humanoid
     context = bpy.context
@@ -1647,7 +1651,7 @@ def check_humanoid_limbs():
 
     if context.scene.arp_export_rig_type == "humanoid":
         #print(len(limb_sides.arm_sides), len(limb_sides.leg_sides), len(limb_sides.head_sides), len(limb_sides.ear_sides), found_root, rig.rig_spine_count, three_bones_leg)
-        if (len(limb_sides.arm_sides) != 2 or len(limb_sides.leg_sides) != 2 or len(limb_sides.head_sides) > 1 or len(limb_sides.ear_sides) > 2 or not found_root or rig.rig_spine_count < 1) or three_bones_leg:
+        if (len(limb_sides.arm_sides) > 2 or len(limb_sides.leg_sides) > 2 or len(limb_sides.head_sides) > 1 or len(limb_sides.ear_sides) > 2 or not found_root or rig.rig_spine_count < 1) or three_bones_leg:
             return False
 
     return True
@@ -1655,20 +1659,24 @@ def check_humanoid_limbs():
 
 def create_copies(self):
     print("\nCreate copies...")
+    scn = bpy.context.scene
     # proxy?
     if self.armature_proxy_name:
         print("  The armature is a proxy. Real name =", self.armature_proxy_name)
-
+    
+    arm = get_object(self.armature_name)
+    
     # store actions
     actions_list = [action.name for action in bpy.data.actions]
-    rig_action = get_object(self.armature_name).animation_data.action
+    rig_action = None
+    if arm.animation_data:
+        if arm.animation_data.action:
+            rig_action = arm.animation_data.action
 
     # get meshes
     print("  Get character objects...")
     
-    arm = get_object(self.armature_name)
-    
-    self.char_objects, self.spline_objects = get_char_objects(arm_name=self.armature_name, arm_add_name=self.armature_add_name, arm_proxy=self.armature_proxy_name, arm_source=self.armature_source_name)
+    self.char_objects, self.spline_objects = get_char_objects(self, arm_name=self.armature_name, arm_add_name=self.armature_add_name, arm_proxy=self.armature_proxy_name, arm_source=self.armature_source_name)
     if len(self.char_objects) <= 10:
         print("  Character objects:", self.char_objects)
     else:
@@ -1686,6 +1694,35 @@ def create_copies(self):
     # set back to rest pose to avoid Spline IK hook offsets
     arm.data.pose_position = 'REST'
     
+    def duplicate_active_object():
+        obj_dupli = bpy.context.active_object.copy()
+        obj_dupli.data = obj_dupli.data.copy()
+        scn.collection.objects.link(obj_dupli)
+        #bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
+        bpy.context.view_layer.update()
+
+        return obj_dupli
+
+        """
+        # previous duplication method, buggy with linked and overridden meshes
+        current_objects_in_scene = [i.name for i in bpy.data.objects]
+
+        bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'})
+        bpy.context.view_layer.update()
+        obj_dupli = bpy.context.active_object
+
+        # blender 2.8 bug, waiting for fix. Duplicated object is invisible, whereas original is not :-(
+        # find duplicated object and unhide it
+        for i in bpy.data.objects:
+            if i.name not in current_objects_in_scene:
+                obj_dupli = i
+                unhide_object(obj_dupli)
+                break
+
+        return obj_dupli
+        """
+        
+            
     # duplicate
     for obj_name in self.char_objects + self.spline_objects:
         #print("  operating on object", obj_name)
@@ -1713,58 +1750,30 @@ def create_copies(self):
             pass
 
         # duplicate
-        def duplicate_active_object():
-            obj_dupli = bpy.context.active_object.copy()
-            obj_dupli.data = obj_dupli.data.copy()
-            bpy.context.scene.collection.objects.link(obj_dupli)
-            #bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
-            bpy.context.view_layer.update()
-
-            return obj_dupli
-
-            """
-            # previous duplication method, buggy with linked and overridden meshes
-            current_objects_in_scene = [i.name for i in bpy.data.objects]
-
-            bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'})
-            bpy.context.view_layer.update()
-            obj_dupli = bpy.context.active_object
-
-            # blender 2.8 bug, waiting for fix. Duplicated object is invisible, whereas original is not :-(
-            # find duplicated object and unhide it
-            for i in bpy.data.objects:
-                if i.name not in current_objects_in_scene:
-                    obj_dupli = i
-                    unhide_object(obj_dupli)
-                    break
-
-            return obj_dupli
-            """
-
         obj_dupli = duplicate_active_object()
 
         # select duplicate
         bpy.ops.object.select_all(action='DESELECT')
         set_active_object(obj_dupli.name)
-
+        
         # previous method, doesn't seem anymore needed with newer duplication method
         # make duplicated proxy objects editable for Blender versions >= 2.90, (already editable by default with previous versions)
         #if self.armature_proxy_name and utils.blender_version._float >= 290:
         #    obj_dupli.data = obj_dupli.data.copy()
         #    bpy.ops.object.make_local(type='SELECT_OBDATA')
         #    bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
-
+        
         if self.is_override:
             #obj_dupli.data = obj_dupli.data.copy()
             bpy.ops.object.make_local(type='SELECT_OBDATA')
             #bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
 
         obj_dupli.name = obj_name + "_arpexport"
-
+        
         # assign object's shape key action if any
         if current_sk_action != None:
             bpy.context.active_object.data.shape_keys.animation_data.action = current_sk_action
-            print("  Assign action", current_sk_action.name)
+            #print("  Assign action", current_sk_action.name)
 
         bpy.ops.object.select_all(action='DESELECT')
 
@@ -1772,7 +1781,7 @@ def create_copies(self):
         if get_object(obj_name):
             get_object(obj_name).hide_select = selectable_state
 
-
+    
     rig_arpexport = get_object(self.armature_name+"_arpexport")
     
     # set back to pose
@@ -1810,9 +1819,96 @@ def create_copies(self):
                 for dr in drivers:
                     replace_driver_target_object(dr, to_replace, self.armature_name + "_arpexport")
 
+    
+    # apply topology changing and deforming modifiers with shape keys
+    mods_types_deform = ['NORMAL_EDIT', 'WEIGHTED_NORMAL', 'ARRAY', 'BEVEL', 'BOOLEAN', 'BUILD', 'DECIMATE', 'EDGE_SPLIT', 'NODES', 'MASK',
+                            'MIRROR', 'REMSESH', 'SCREW', 'SKIN', 'SOLIDIFY', 'TRIANGULATE', 'SUBSURF', 'TRIANGULATE', 'VOLUME_TO_MESH', 'WELD',
+                            'WIREFRAME', 'CAST', 'CURVE', 'DISPLACE', 'HOOK', 'LAPLACIANDEFORM', 'LATTICE', 'MESH_DEFORM', 'SHRINKWRAP', 
+                            'SIMPLE_DEFORM', 'SMOOTH', 'CORRECTIVE_SMOOTH', 'LAPLACIANSMOOTH', 'SURFACE_DEFORM', 'WARP', 'WAVE', 'CLOTH', 'EXPLODE',
+                            'FLUID', 'OCEAN', 'SOFT_BODY']
+                            
+    exclude_mods = ['ARMATURE', 'SUBSURF']
+    if scn.arp_apply_subsurf:
+        exclude_mods.remove('SUBSURF')
+    
+    if scn.arp_apply_mods:
+        arm.data.pose_position = rig_arpexport.data.pose_position = 'REST'
+        
+        for obj_name in self.char_objects + self.spline_objects:
+            obj_sk = get_object(obj_name+'_arpexport')
+            apply_sk_mods = False
+            if obj_sk.type == "MESH":     
+                # if subsurf export disabled, remove subsurf modifiers, to prevent apply when real Fbx export
+                if scn.arp_apply_subsurf == False:                    
+                    for mod in obj_sk.modifiers:
+                        if mod.type == 'SUBSURF':
+                            obj_sk.modifiers.remove(mod)
+                            
+                # if has shape keys and 'deform' modifiers, tag it to apply modifiers
+                if obj_sk.data.shape_keys and len(obj_sk.modifiers):
+                    if len(obj_sk.data.shape_keys.key_blocks):
+                        for mod in obj_sk.modifiers:
+                            if mod.type in mods_types_deform:
+                                apply_sk_mods = True
+                                
+            if apply_sk_mods:
+                # duplicate the mesh
+                print("  Applying topology changing/deforming modifiers with shape keys of object: ["+obj_sk.name+"]...")
+                bpy.ops.object.select_all(action='DESELECT')
+                set_active_object(obj_sk.name)
+                dupli_mesh = duplicate_active_object()
 
+                # store driver variables with shape keys as target, since the mesh duplication does not preserve them
+                sk_driver_dict = {}
+                sk_anim_data = obj_sk.data.shape_keys.animation_data
+                if sk_anim_data and sk_anim_data.drivers:
+                    for dr in sk_anim_data.drivers:
+                        for i, var in enumerate(dr.driver.variables):
+                            if var.targets[0].id_type == 'KEY':
+                                target_id = var.targets[0].id
+                                if target_id:
+                                    sk_driver_dict[dr.data_path+' '+var.name] = dr.data_path, var.name, target_id.name          
+                                
+                                
+                # delete shape keys on the original mesh
+                print("  remove shape keys data...")
+                set_active_object(obj_sk.name)
+                for i in reversed(range(len(obj_sk.data.shape_keys.key_blocks))):
+                    #print("remove sk", obj_sk.data.shape_keys.key_blocks[i])
+                    obj_sk.active_shape_key_index = i
+                    bpy.ops.object.shape_key_remove()
+                    
+                # apply modifiers
+                for mod in obj_sk.modifiers:
+                    if mod.type in exclude_mods or (mod.show_viewport == False and mod.show_render == False):
+                        continue
+                    set_active_object(obj_sk.name)
+                    apply_modifier(mod.name)
+
+                # transfer shape keys
+                print("  transfer shape keys data...", dupli_mesh.name + ' > ' + obj_sk.name)
+                
+                transfer_shape_keys_deformed(dupli_mesh, obj_sk, apply_mods=True)
+                
+                # restore driver variables with shape keys as target
+                for dp_var in sk_driver_dict:
+                    sk_anim_data = obj_sk.data.shape_keys.animation_data
+                    dp, var_name, shape_keys_name = sk_driver_dict[dp_var]            
+                    dr = sk_anim_data.drivers.find(dp)
+                    var = dr.driver.variables.get(var_name)
+                    var.targets[0].id = bpy.data.shape_keys.get(shape_keys_name)
+
+                # delete duplicate
+                if dupli_mesh:
+                    bpy.data.objects.remove(dupli_mesh, do_unlink=True)
+                
+                print("  Done")
+                        
+        arm.data.pose_position = rig_arpexport.data.pose_position = 'POSE'
+        
     # parent meshes to armature
     for obj_name in self.char_objects + self.spline_objects:
+        
         ob = get_object(obj_name + "_arpexport")
         if ob.type == "MESH" or ob.type == "CURVE":
             ob_mat = ob.matrix_world.copy()
@@ -1892,11 +1988,12 @@ def create_copies(self):
         if not action.name in actions_list:
             bpy.data.actions.remove(action, do_unlink=True)
 
-    # assign the current action to the duplicated rig
-    get_object(self.armature_name+"_arpexport").animation_data.action = rig_action
+    # assign the current action to the duplicated rig   
+    if rig_action:
+        get_object(self.armature_name+"_arpexport").animation_data.action = rig_action
 
     print("Copied.")
-
+    
 
 def is_proxy_bone(bone):
     if bone.parent:
@@ -2021,10 +2118,12 @@ def init_armatures_scales(armature_name, armature_add_name, self):
 
     print("scaling location:", rig_scale)
     # Apply scale to animation curves
+    
     for action in bpy.data.actions:
         has_changed = False
         for fcurve in action.fcurves:
-            if 'location' in fcurve.data_path and "pose.bones[" in fcurve.data_path:
+            skip = False
+            if 'location' in fcurve.data_path and fcurve.data_path.startswith("pose.bones["):
                 for point in fcurve.keyframe_points:
                     point.co[1] *= rig_scale
                     point.handle_left[1] *= rig_scale
@@ -2034,11 +2133,22 @@ def init_armatures_scales(armature_name, armature_add_name, self):
         # keep track of modified actions to revert later
         if has_changed:
             self.actions_units_changed.append(action.name)
-
+            
+    # Apply scale to Transformation constraints
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    for pb in bpy.context.active_object.pose.bones:
+        if len(pb.constraints):
+            for cns in pb.constraints:
+                if cns.type == "TRANSFORM":
+                    if cns.subtarget.startswith('c_foot_roll_cursor'):
+                        cns.from_min_x *= rig_scale
+                        cns.from_max_x *= rig_scale
+                        cns.from_min_z *= rig_scale
+                        cns.from_max_z *= rig_scale
     
     # Reset stretches
-        #store active pose
-    bpy.ops.object.mode_set(mode='POSE')
+        #store active pose    
     bpy.ops.pose.select_all(action='SELECT')
     bpy.ops.pose.copy()
 
@@ -2890,7 +3000,6 @@ def _set_mannequin_orientations(self):
         # Create main orient bones
         new_bone1 = rig_humanoid.data.edit_bones.new(bone_name + "_orient")
         new_bone1.head, new_bone1.tail, new_bone1.roll = bone_childof.head.copy(), bone_childof.tail.copy(), bone_childof.roll
-            #set layer
         set_bone_layer(new_bone1, 17)
 
 
@@ -2912,8 +3021,8 @@ def _set_mannequin_orientations(self):
         cns1.target = rig_humanoid
         cns1.subtarget = bone_name + "_childof"
 
-    bpy.ops.object.mode_set(mode='EDIT')
-
+    bpy.ops.object.mode_set(mode='EDIT')    
+    
     print("  Set parents...")
 
     if 'ebone' in locals():
@@ -2970,6 +3079,43 @@ def _set_mannequin_orientations(self):
         if '_orient' in ebone.name:
             ebone.name = ebone.name.replace("_orient", "")
 
+    
+    # specials: swap arms and thigh twist bones position to match accurately the UE humanoid skeleton
+    if scn.arp_retro_ge_UE_twist_pos == False:
+        for i in range(1,33):
+            idx = '%02d' % i
+            idx_next = '%02d' % (i+1)
+            for side in ('_l', '_r', '_l_childof', '_r_childof'):
+            
+                limb_list = [['thigh', 'calf']]
+                if scn.arp_ue4 == False:# the arm twist bone of the UE4 humanoid is at the root (shoulder) position, unlike the thigh twist in the middle
+                    limb_list.append(['upperarm', 'lowerarm'])
+                    
+                for limb in limb_list:
+                    b1_name = limb[0]
+                    b2_name = limb[1]
+                    twist_eb = get_edit_bone(b1_name+'_twist_'+idx+side)
+                    twist_eb_next = get_edit_bone(b1_name+'_twist_'+idx_next+side)
+                    
+                    if twist_eb and twist_eb_next:
+                        vec = twist_eb_next.head - twist_eb.head
+                        twist_eb.head += vec
+                        twist_eb.tail += vec
+                    elif twist_eb:
+                        if arp_armature.arp_secondary_type in ['NONE', 'ADDITIVE']:
+                            b2_eb = get_edit_bone(b2_name+side)
+                            if b2_eb:
+                                vec = b2_eb.head - twist_eb.head
+                                twist_eb.head += vec/2
+                                twist_eb.tail += vec/2
+                        elif arp_armature.arp_secondary_type == 'TWIST_BASED':
+                            c_b1_eb = get_edit_bone('c_'+b1_name+side)                    
+                            if c_b1_eb:
+                                vec = c_b1_eb.head - twist_eb.head
+                                twist_eb.head += vec
+                                twist_eb.tail += vec
+
+    
     #display only final bones layer
     rig_humanoid.data.layers[0] = rig_humanoid.data.layers[1] = rig_humanoid.data.layers[16] = False
     # ensure all deforming bones are in layer 17
@@ -3310,7 +3456,7 @@ def _bake_all(armature_name, baked_armature_name, self):
                             if action["arp_export"] == False:
                                 bake_this_action = False
 
-
+            
             if bake_this_action:
                 #print("  Baking action:", action.name)
                 frame_range =action.frame_range
@@ -3325,19 +3471,10 @@ def _bake_all(armature_name, baked_armature_name, self):
 
                 if not found_bone_fcurve:
                     self.non_armature_actions.append(action.name)
-                    print("  This action contains no bones keyframes:", action.name)
-
+                    print("  This action contains no bones keyframes:", action.name)                
+                
                 # Add 0.01 angle offset to rotation keyframes if values == 0.0 to fix wrong rotation export
                 if scn.arp_fix_fbx_rot:
-                    for fcurve in action.fcurves:
-                        if 'rotation' in fcurve.data_path and "pose.bones" in fcurve.data_path:
-                            for point in fcurve.keyframe_points:
-                                if point.co[1] == 0.0:
-                                    point.co[1] += 0.0002
-                                    point.handle_left[1] += 0.0002
-                                    point.handle_right[1] += 0.0002
-
-
                     set_active_object(arp_armature.name)
 
                     bpy.ops.object.mode_set(mode='POSE')
@@ -3400,7 +3537,8 @@ def _bake_all(armature_name, baked_armature_name, self):
                 # Bake bones transforms
                 print("  Baking action:", act_export_name, '['+str(int(fs))+'-'+str(int(fe))+']')                
                 bake_anim(frame_start=fs, frame_end=fe, only_selected=True, bake_bones=True, bake_object=True, shape_keys=True, _self=self, action_export_name=act_export_name)
-            
+                
+                
                 # Bake fcurve of custom properties driving shape keys if any
                 # Disable it for now, useless since shape keys are already baked previously
                 # Also, do not work if the shape key driver bone holding the props is not a custom bone (may not exist in the exported rig)
@@ -3445,9 +3583,21 @@ def _bake_all(armature_name, baked_armature_name, self):
                     print("    Error when assigning the action because it's used in the NLA. Remove it from the NLA to export.")
 
                 # tag the baked action
-                bpy.data.actions.get(act_export_name)["arp_baked_action"] = 1
+                baked_action = bpy.data.actions.get(act_export_name)
+                baked_action["arp_baked_action"] = 1
 
                 self.actions_were_exported = True
+                
+                # Add 0.01 angle offset to rotation keyframes if values == 0.0 to fix wrong rotation export
+                if scn.arp_fix_fbx_rot:
+                    for fcurve in baked_action.fcurves:
+                        if 'rotation' in fcurve.data_path and "pose.bones" in fcurve.data_path:
+                            for point in fcurve.keyframe_points:
+                                if point.co[1] == 0.0:
+                                    point.co[1] += 0.0002
+                                    point.handle_left[1] += 0.0002
+                                    point.handle_right[1] += 0.0002
+                    
 
         # restore original active action
         base_armature.animation_data.action = original_action
@@ -3464,6 +3614,7 @@ def _bake_all(armature_name, baked_armature_name, self):
 
 
 def _select_exportable(armature_name):
+    scn = bpy.context.scene
     arp_armature = get_object(armature_name + "_arpexport")
 
     if bpy.context.scene.arp_export_rig_type == "humanoid" or bpy.context.scene.arp_export_rig_type == "mped":
@@ -3504,16 +3655,21 @@ def _select_exportable(armature_name):
 
 
         #check if the meshes have shape keys and disable subsurf if any before export
-        for obj in bpy.context.selected_objects:
-            if obj.type == 'MESH':
-                if obj.data.shape_keys != None:
-                    if len(obj.data.shape_keys.key_blocks) > 0:
-                        if len(obj.modifiers) > 0:
-                            for modif in obj.modifiers:
-                                if modif.show_render:
-                                    if modif.type == 'SUBSURF' or modif.type == 'SMOOTH' or modif.type == 'MASK' or modif.type == "MULTIRES":
-                                        #print(obj.name + " has shape keys, " + modif.type + " modifier won't be exported.")
-                                        obj.modifiers.remove(modif)
+        exclude_mods = ['SUBSURF', 'SMOOTH', 'MASK', 'MULTIRES']
+        if scn.arp_apply_subsurf:
+            exclude_mods.remove('SUBSURF')
+            
+        if scn.arp_apply_mods == False:
+            for obj in bpy.context.selected_objects:
+                if obj.type == 'MESH':
+                    if obj.data.shape_keys:
+                        if len(obj.data.shape_keys.key_blocks):
+                            if len(obj.modifiers):
+                                for modif in obj.modifiers:
+                                    if modif.show_render:
+                                        if modif.type in exclude_mods:
+                                            #print(obj.name + " has shape keys, " + modif.type + " modifier won't be exported.")
+                                            obj.modifiers.remove(modif)
 
         # select the export armature
         if get_object(baked_armature_name) != None:
@@ -3521,7 +3677,7 @@ def _select_exportable(armature_name):
             set_active_object(baked_armature_name)
 
 
-def get_char_objects(arm_name=None, arm_add_name=None, arm_proxy=None, arm_source=None):
+def get_char_objects(self, arm_name=None, arm_add_name=None, arm_proxy=None, arm_source=None):
     rig_add = None
     scn = bpy.context.scene
     if arm_add_name:
@@ -3547,12 +3703,6 @@ def get_char_objects(arm_name=None, arm_add_name=None, arm_proxy=None, arm_sourc
 
     if scn.arp_ge_sel_only:
         objs = [obj for obj in bpy.context.selected_objects]
-        """
-        if arm_proxy:# if it's a proxy, ensure the rig only is exported
-            objs = [get_object(arm_name)]
-        else:
-            objs = [obj for obj in bpy.context.selected_objects]
-        """
     else:
         objs = [obj for obj in bpy.context.view_layer.objects]# collect objects in view_layer only, objects in file data may be not accessible
 
@@ -3586,21 +3736,23 @@ def get_char_objects(arm_name=None, arm_add_name=None, arm_proxy=None, arm_sourc
                    
 
     #check if the meshes have shape keys and disable subsurf if any before export
-    for obj_name in list_char_objects:
-        obj = get_object(obj_name)
-        if obj.type == 'MESH':
-            if obj.data.shape_keys != None:
-                if len(obj.data.shape_keys.key_blocks) > 0:
-                    if len(obj.modifiers) > 0:
-                        for modif in obj.modifiers:
-                            if modif.type == 'SUBSURF' or modif.type == "MULTIRES":
-                                modif.show_render = False
-                                modif.show_viewport = False
-                                print('\nMesh', obj.name, 'has shape keys, disable', modif.type,  'modifiers for export')
+    if scn.arp_apply_mods == False and scn.arp_apply_subsurf == False:
+        for obj_name in list_char_objects:
+            obj = get_object(obj_name)
+            if obj.type == 'MESH':
+                if obj.data.shape_keys != None:
+                    if len(obj.data.shape_keys.key_blocks) > 0:
+                        if len(obj.modifiers) > 0:
+                            for modif in obj.modifiers:
+                                if modif.type == 'SUBSURF' or modif.type == "MULTIRES":
+                                    modif.show_render = False
+                                    modif.show_viewport = False
+                                    print('\nMesh', obj.name, 'has shape keys, disable', modif.type,  'modifiers for export')
 
 
     # if the armature only is exported, add an extra dummy mesh to allow the armature's rest pose export and correct hierarchy in Unity
-    add_dummy_mesh = True
+    print('arp_engine_type', scn.arp_engine_type)
+    add_dummy_mesh = self.export_format == 'FBX' and ((scn.arp_engine_type == 'unreal' and self.is_arp_armature) or scn.arp_ge_add_dummy_mesh)
     if add_dummy_mesh:
         if (len(list_char_objects) == 2 and rig_add) or len(list_char_objects) == 1:
             dum_ob = create_dummy_mesh()
@@ -3643,11 +3795,12 @@ def get_shape_keys_drivers(_obj):
 
 
 def _set_units_x100_baked(armature_name, self):
+    
     scn = bpy.context.scene
     unit_system = scn.unit_settings
     scn.tool_settings.use_keyframe_insert_auto = False
     current_frame = scn.frame_current#save current frame
-
+    
     if unit_system.system == 'NONE' or (unit_system.system != 'NONE' and (unit_system.scale_length > 1.0-0.0003 and unit_system.scale_length < 1.0+0.0003)):
         print("..............................Set Units x100 (baked)..............................")
 
@@ -3742,17 +3895,19 @@ def _set_units_x100_baked(armature_name, self):
             _obj.scale *= 100
 
         bpy.context.evaluated_depsgraph_get().update()
-
+        
+        meshes_bone_par = []
         unparented_meshes = []
         unparented_meshes_bone = {}
         for i in bpy.data.objects:
             if i.name.endswith("_arpexport") and i.parent_type == "BONE" and i.parent_bone != "" and i.parent == baked_armature:
                 unparented_meshes_bone[i.name] = i.parent_bone
+                meshes_bone_par.append(i)
 
         # unparent mesh children
         for mesh in meshes:
             if mesh.parent == rig:
-                unparented_meshes.append(mesh.name)
+                unparented_meshes.append(mesh.name)                
                 mesh_mat = mesh.matrix_world.copy()
                 mesh.parent = None
                 bpy.context.evaluated_depsgraph_get().update()
@@ -3815,7 +3970,8 @@ def _set_units_x100_baked(armature_name, self):
             mesh_obj.matrix_world = mesh_mat
 
         # Initialize meshes scale
-        for mesh in meshes:
+        for mesh in meshes + meshes_bone_par:
+            
             set_active_object(mesh.name)
             # multiply scalable value of modifiers
             if len(mesh.modifiers) > 0:
@@ -3848,138 +4004,109 @@ def _set_units_x100_baked(armature_name, self):
         print('  x100 Units (baked) set successfully.')
 
 
-######### FOR RETRO COMPATIBILITY ONLY !#########
-def _unset_humanoid_rig(self, context):
-    scene = context.scene
-
-    if get_object('rig_humanoid') != None:
-
-        humanoid_armature = get_object('rig_humanoid')
-
-        #disable Mannequin Axes if set
-        if humanoid_armature.data.bones.get("thigh.l_basebone") != None:
-            _unset_ue_orientations()
-
-        if humanoid_armature.data.bones.get("pelvis") != None:
-            revert_rename_for_ue()
-            print("Reverted UE names")
-
-        #set surface subdivision to 0 to speed up
-        simplify = bpy.context.scene.render.use_simplify #save
-        simplify_value = bpy.context.scene.render.simplify_subdivision
-        bpy.context.scene.render.use_simplify = True#set
-        bpy.context.scene.render.simplify_subdivision = 0
-
-        #get the armatures
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-        arp_armature = get_object('rig')
-
-        set_active_object(arp_armature.name)
-        bpy.ops.object.mode_set(mode='POSE')
-
-        #unlock the root translation
-        for i in range(0,3):
-            get_pose_bone("c_root.x").lock_location[i] = False
-
-        bpy.ops.object.mode_set(mode='OBJECT')
-        hide_state = humanoid_armature.hide_get()
-        unhide_object(humanoid_armature)
-
-        # set the ARP armature as the deforming one
-
-        #Check for deprecated groups names
-        deprecated_groups_list = ["c_pinky1", "c_ring1", "c_middle1", "c_index1", "c_thumb1"]
-        found_new_finger_bone = False
-
-        for bone in arp_armature.data.bones:
-            if bone.name == "index1.l":
-                found_new_finger_bone = True
-                print("Found new finger bone")
-                break
-
-
-        for obj in bpy.data.objects:
-            if obj.type == 'MESH':
-
-                found_rig_add = False
-                found_rig = False
-
-                for modif in obj.modifiers:
-                    if modif.type == 'ARMATURE':
-                        if modif.object == humanoid_armature:
-                            found_rig = True
-                            modif.object = arp_armature
-                            modif.use_deform_preserve_volume = True
-                        if modif.object == get_object("rig_add"):
-                            found_rig_add = True
-
-                if not found_rig_add and found_rig:
-                    #add the rig_add modifier
-                    new_mod = obj.modifiers.new("rig_add", 'ARMATURE')
-                    new_mod.object = get_object("rig_add")
-                    #re order
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    bpy.ops.object.select_all(action='DESELECT')
-                    set_active_object(obj.name)
-                    for i in range(0,20):
-                        bpy.ops.object.modifier_move_up(modifier="rig")
-                    for i in range(0,20):
-                        bpy.ops.object.modifier_move_up(modifier="rig_add")
-                    #put mirror at first
-                    for m in bpy.context.active_object.modifiers:
-                        if m.type == 'MIRROR':
-                            for i in range(0,20):
-                                bpy.ops.object.modifier_move_up(modifier=m.name)
-
-                #change deprecated vertex groups
-                if found_new_finger_bone:
-                    if len(obj.vertex_groups) > 0:
-                        for vgroup in obj.vertex_groups:
-                            for name in deprecated_groups_list:
-                                if name in vgroup.name and not "base" in vgroup.name:
-                                    vgroup.name = vgroup.name[2:]
-                                    print("Replaced vertex group:", vgroup.name)
-                            #rename arm twist vgroup
-                            if "arm_twist" in vgroup.name and not "forearm" in vgroup.name:
-                                vgroup.name = vgroup.name.replace("arm_twist", "c_arm_twist_offset")
+def _unset_export_rig(arp_armature_name, humanoid_name):
+    print('Unset export rig...')
+    arp_armature = get_object(arp_armature_name)
+    humanoid_armature = get_object(humanoid_name)
+    
+    #set surface subdivision to 0 to speed up
+    simplify = bpy.context.scene.render.use_simplify #save
+    simplify_value = bpy.context.scene.render.simplify_subdivision
+    bpy.context.scene.render.use_simplify = True#set
+    bpy.context.scene.render.simplify_subdivision = 0
+    
+    # get all deformed meshes
+    skinned_meshes = []
+    
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        
+        if obj.find_armature() == None:
+            continue
+        
+        if obj.find_armature().name == humanoid_name:
+            skinned_meshes.append(obj.name)
+            
+    print('  Restoring ARP weights...')
+    for obj_name in skinned_meshes:
+        obj = get_object(obj_name)
+        
+        # restore vertex groups/weights
+        if 'arp_saved_weights' in obj.keys():          
+            # remove all existing groups
+            vg_names = [vg.name for vg in obj.vertex_groups]# make a copy to avoid corrupted iteration when deleting
+            for vg_name in vg_names:
+                vg = obj.vertex_groups.get(vg_name)
+                obj.vertex_groups.remove(vg)
+                
+            # restore saved groups 
+            weight_dict = obj['arp_saved_weights']
+              
+            for grp_name in weight_dict:
+                weight_list = weight_dict[grp_name]               
+                for i, j in enumerate(weight_list):                 
+                    vi, vertex_weight = weight_list[i]
+                    vi = int(vi)
+                    vg = obj.vertex_groups.get(grp_name)
+                    if vg == None:
+                        vg = obj.vertex_groups.new(name=grp_name)
+                    vg.add([vi], vertex_weight, 'REPLACE')
+                
+                
+        # restore armature modifiers
+        for mod in obj.modifiers:
+            if mod.type == 'ARMATURE':
+                if mod.object:
+                    if mod.object.name == humanoid_name:
+                        mod.object = arp_armature
+    
+    print('  Remove humanoid armature...')
+    # remove humanoid
+    delete_object(humanoid_armature)
+    
+    # untag
+    del arp_armature['arp_export_rig_set']
+    
+    
+    #restore simplification
+    bpy.context.scene.render.use_simplify = simplify
+    bpy.context.scene.render.simplify_subdivision = simplify_value
+    print('  Unset.')
+    # end unset_export_rig()
 
 
-        #Delete the humanoid
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.select_all(action='DESELECT')
-        set_active_object(humanoid_armature.name)
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.delete()
-
-        #Push the bend bones transform *0.5
-        if scene.arp_keep_bend_bones and scene.push_bend:
-            _action = arp_armature.animation_data.action
-            if _action != None:
-                for fcurve in _action.fcurves:
-                    for bbone in bend_bones_add:
-                        if bbone in fcurve.data_path:#operate only on bend bone add fcurves
-                            for key in fcurve.keyframe_points:
-                                if not 'scale' in fcurve.data_path:
-                                    key.co[1] *= 0.5
-                                    key.handle_right[1] *= 0.5
-                                    key.handle_left[1] *= 0.5
-
-                                else:
-                                    key.co[1] = (key.co[1] + 1) * 0.5
-                                    key.handle_right[1] = (key.handle_right[1] + 1) * 0.5
-                                    key.handle_left[1] = (key.handle_left[1] + 1) * 0.5
-                            break
-
-        #restore simplification
-        bpy.context.scene.render.use_simplify = simplify
-        bpy.context.scene.render.simplify_subdivision = simplify_value
-
-    else:
-        print("rig_humanoid not found.")
-    # end unset_humanoid_rig()
-
-
+def _save_mesh_weights(rig_name):
+    # get all deformed meshes
+    skinned_meshes = []
+    
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        
+        if obj.find_armature() == None:
+            continue
+        
+        if obj.find_armature().name == rig_name:
+            skinned_meshes.append(obj.name)
+            
+    # save weights
+    for obj_name in skinned_meshes:
+        obj = get_object(obj_name)       
+        weight_dict = {}
+        for v in obj.data.vertices:
+            for vgroup in v.groups:
+                grp_name = obj.vertex_groups[vgroup.group].name
+                if grp_name in weight_dict:                  
+                    cur_list = weight_dict[grp_name]                  
+                    cur_list.append((v.index, vgroup.weight))
+                    weight_dict[grp_name] = cur_list                   
+                else:
+                    weight_dict[grp_name] = [(v.index, vgroup.weight)]
+                  
+        obj['arp_saved_weights'] = weight_dict
+    
+    
 def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     print("\n..............................Building humanoid rig..............................")
     scn = bpy.context.scene
@@ -3992,6 +4119,25 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     thigh_stretch_name = 'thigh_stretch'
     thigh_twist_name = 'thigh_twist'
 
+    # multi-lips support
+    for bname in ard.get_variable_lips('.x', type='CONTROLLER', no_side=True):
+        if not bname in additional_facial_bones:
+            additional_facial_bones.append(bname)
+        if not bname in facial_transfer_head and 'top_' in bname:
+            facial_transfer_head.append(bname)
+        if not bname in facial_transfer_jaw and 'bot_' in bname:
+            facial_transfer_jaw.append(bname)
+            
+    # multi-eyelids support
+    for bname in ard.get_variable_eyelids('.x', type='CONTROLLER', no_side=True):
+        if not bname in additional_facial_bones:
+            additional_facial_bones.append(bname)
+        if not bname in facial_transfer_head and 'top' in bname:
+            facial_transfer_head.append(bname)
+            
+    for side in ['.l', '.r']:# eyelid twk
+        for lvl in ['bot', 'top']:
+            facial_transfer_head.append('c_eyelid_twk_'+lvl+side)        
 
     # Select the arp armature
     arp_armature = None
@@ -4017,12 +4163,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
         collected_meshes.append(obj.name)
 
     bpy.ops.object.mode_set(mode='OBJECT')
-
-    arp_armature = None
-    if manual_set_debug:
-        arp_armature = get_object(armature_name)
-    else:
-        arp_armature = get_object(armature_name + '_arpexport')
+    
 
     # append the humanoid armature
     addon_directory = os.path.dirname(os.path.abspath(__file__))
@@ -4100,7 +4241,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
 
 
     # 3 spines bones
-    if arp_armature.rig_spine_count == 3:
+    elif arp_armature.rig_spine_count == 3:
         set_active_object(humanoid_armature.name)
         bpy.ops.object.mode_set(mode='EDIT')
         if get_edit_bone('spine_03.x') != None:
@@ -4221,6 +4362,8 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             for bname in ['arm', 'forearm', 'thigh', 'leg']:
                 c_stretch_name = 'c_'+bname+'_stretch'+side
                 c_stretch = get_edit_bone(c_stretch_name)
+                if c_stretch == None:
+                    continue# disable limbed
                 b_parent_n = bname+'_stretch'+side
                 sftlink = is_softlink_bone(c_stretch_name)
                 
@@ -4375,8 +4518,9 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
                 is_bend_bone_valid = False
 
             if is_bend_bone_valid:
-                if not bpy.context.active_object.data.bones[edit_bone.name].layers[22]:#check for disabled limb
-                    bones_dict[edit_bone.name] = {"head":edit_bone.head.copy(), "tail":edit_bone.tail.copy(), "roll":edit_bone.roll, "deform":True, "softlink":bone_softlink, 'rename':get_renamed_bone(edit_bone.name)}
+                # old condition from older ARP version when keeping disabled limbs in layer 22. Disable it for now
+                #if not get_data_bone(edit_bone.name).layers[22]:#check for disabled limb
+                bones_dict[edit_bone.name] = {"head":edit_bone.head.copy(), "tail":edit_bone.tail.copy(), "roll":edit_bone.roll, "deform":True, "softlink":bone_softlink, 'rename':get_renamed_bone(edit_bone.name)}
 
         # Facial
         if scn.arp_full_facial and is_facial_enabled(arp_armature):
@@ -4389,12 +4533,6 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             if edit_bone.use_deform:
                 bones_dict[edit_bone.name] = {"head":edit_bone.head.copy(), "tail":edit_bone.tail.copy(), "roll":edit_bone.roll, "deform":True, "softlink":bone_softlink, 'rename':get_renamed_bone(edit_bone.name)}
 
-
-        """
-        if edit_bone.name[:-4] == "c_tail_" and edit_bone.name[-2:] == ".x":
-            if edit_bone.use_deform:
-                bones_dict[edit_bone.name] = {"head":edit_bone.head.copy(), "tail":edit_bone.tail.copy(), "roll":edit_bone.roll, "deform":True, "softlink":bone_softlink}
-        """
 
         # Breast
         if edit_bone.name[:-2] == "c_breast_01" or edit_bone.name[:-2] == "c_breast_02":
@@ -4419,8 +4557,8 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             _bname = 'c_' + _bname
 
         edit_bone = get_edit_bone(_bname)
-        if edit_bone == None:# the bone, such as fingers, is disabled. Then store it with null values
-            bones_dict[bname] = {"head":Vector((0,0,0)), "tail":Vector((0,0,0)), "roll":0.0, "deform":False}
+        if edit_bone == None:# the bone belongs to a disabled limb, store it with null values
+            bones_dict[bname] = {"head":Vector((0,0,0)), "tail":Vector((0,0,0)), "roll":0.0, "deform":False, "softlink":False}
             continue
 
         bone_softlink = is_softlink_bone(_bname)
@@ -4454,7 +4592,8 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     for side in sides:        
         bname = 'thigh_ref'+side
         thigh_ref = get_edit_bone(bname)
-        bones_dict[bname] = {"head":thigh_ref.head.copy(), "tail":thigh_ref.tail.copy(), "roll":thigh_ref.roll, "deform":False}
+        if thigh_ref:
+            bones_dict[bname] = {"head":thigh_ref.head.copy(), "tail":thigh_ref.tail.copy(), "roll":thigh_ref.roll, "deform":False}
 
 
     if is_facial_enabled(arp_armature):
@@ -4577,7 +4716,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
         if 'thigh_ref' in bname:
             continue
 
-        new_bone = humanoid_armature.data.edit_bones.new(bname)
+        new_bone = create_edit_bone(bname, deform=True)
         new_bone.head = Vector((0,0,0))
         new_bone.tail = Vector((0,1,0))
         new_bone["softlink"] = bones_dict[bname]["softlink"]
@@ -4615,7 +4754,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
 
     # Add twist bones
     print("  Create twist bones...")
-    if len(twist_bones_dict) > 0:
+    if len(twist_bones_dict):
         for twist_bone_name in twist_bones_dict:
             bname = twist_bone_name
             if twist_bone_name.startswith("c_arm_twist_offset"):
@@ -4629,10 +4768,9 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             new_bone["rename"] = twist_bones_dict[twist_bone_name]["rename"]
 
     # Add stretch bones
-    if len(c_stretch_dict) > 0:
-        for stretch_bone_name in c_stretch_dict:
-            print(stretch_bone_name)
-            new_bone = humanoid_armature.data.edit_bones.new(stretch_bone_name)
+    if len(c_stretch_dict):
+        for stretch_bone_name in c_stretch_dict:            
+            new_bone = create_edit_bone(stretch_bone_name, deform=True)
             new_bone.head = c_stretch_dict[stretch_bone_name]["head"]
             new_bone.tail = c_stretch_dict[stretch_bone_name]["tail"]
             new_bone.roll = c_stretch_dict[stretch_bone_name]["roll"]
@@ -4732,7 +4870,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
         if is_custom_bone(bname) or is_bend_bone(bname) or (is_in_facial_deform(bname) and scn.arp_full_facial) or bname[:-2] in additional_facial_bones or bname.startswith('c_toes_') or bname.startswith("c_tail_") or bname.startswith("c_breast_01") or bname.startswith("c_breast_02") or bname.startswith("c_ear_"):
 
             bone_parent_name = ""
-
+            
             eb = arp_armature.data.bones.get(bname)
             if eb:
                 if eb.parent:
@@ -4755,7 +4893,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
                         bone_parent_name = 'c_skull_02.x'
                     else:
                         bone_parent_name = 'head.x'
-                if 'lips_' in bname and '_offset' in bone_parent_name:
+                if 'lips_' in bname and '_offset' in bone_parent_name or '_master' in bone_parent_name:
                     if 'top' in bname or 'smile' in bname:
                         if arp_armature.data.bones.get('c_skull_01.x'):
                             bone_parent_name = 'c_skull_01.x'
@@ -4803,7 +4941,10 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     last_id = 0
     for bname in subneck_coords:
         ebone = get_edit_bone(bname)
-        ebone.parent = get_edit_bone(subneck_coords[bname]["parent"])
+        par_name = subneck_coords[bname]["parent"]
+        ebone.parent = get_edit_bone(par_name)
+        if ebone.parent == None:            
+            ebone.parent = get_edit_bone(find_matching_parent(par=par_name, item="bone"))
         id = bname.split('_')[2]
         id = id.split('.')
         if len(id) > 1:
@@ -4813,7 +4954,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             last_id = id
             last_subneck = bname
 
-    if len(subneck_coords) > 0:
+    if len(subneck_coords):
         neck_bone = get_edit_bone("neck.x")
         if neck_bone:
             neck_bone.parent = get_edit_bone(last_subneck)
@@ -4912,6 +5053,9 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             b.use_deform = bones_dict[b.name]["deform"]
 
         elif base_name == 'thigh_stretch':
+            if not 'thigh_ref'+side in bones_dict:
+                b.head = [0,0,0]# zero out for auto-deletion, disabled leg
+                continue
             b.head = bones_dict['thigh_ref'+side]["head"]
 
             # Backward-compatibility
@@ -4920,6 +5064,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
                 if scn.arp_export_twist and b["softlink"] == 1:
                     b.head = bones_dict[b.name]["head"]
 
+            
             b.tail= bones_dict['thigh_ref'+side]["tail"]
             b.roll = bones_dict[b.name]["roll"]
             b.use_deform = bones_dict[b.name]["deform"]
@@ -5143,6 +5288,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     facial_enabled = is_facial_enabled(arp_armature)
 
     # Iterate over meshes (humanoid)
+    
     for obj_name in collected_meshes:
         #print("iterating object", obj_name)
 
@@ -5175,9 +5321,13 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
             #print("replaced armature", humanoid_armature.name)
             modif.use_deform_preserve_volume = False
 
-            jawbone_vgroup = obj.vertex_groups.get("jawbone.x")
-            if jawbone_vgroup:
-                jawbone_vgroup.name = "c_jawbone.x"
+            c_jaw_vg = obj.vertex_groups.get("c_jawbone.x")
+            if c_jaw_vg:
+                obj.vertex_groups.remove(c_jaw_vg)
+                
+            jawbone_vg = obj.vertex_groups.get("jawbone.x")
+            if jawbone_vg:
+                jawbone_vg.name = "c_jawbone.x"
 
 
             # Transfer weights (per vert, faster)
@@ -5269,10 +5419,12 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     set_active_object(humanoid_armature.name)
 
     bpy.ops.object.mode_set(mode='POSE')
-
+    
+    print('')
+    
     for mesh in collected_meshes:
         obj = get_object(mesh)
-        if len(obj.keys()) > 0:
+        if len(obj.keys()):
             if "arp_parent_bone" in obj.keys():
                 b_parent = obj["arp_parent_bone"]
 
@@ -5285,7 +5437,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
 
                 # If not found, tries to match with other bones
                 if not parent_found:
-                    print('  Object: "' + obj.name + '" did not found direct parent bone "' + b_parent + '" in the humanoid armature. Look for other bones...')
+                    print('  Object: "' + obj.name + '" did not find direct parent bone "' + b_parent + '" in the humanoid armature. Look for other bones...')
                     b_parent = find_matching_parent(par = b_parent, item = "object")
 
                 obj_matrix = obj.matrix_world.copy()
@@ -5379,7 +5531,7 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-    #Push the bend bones?
+    # Push the bend bones?
     if scn.arp_keep_bend_bones and scn.arp_push_bend and (arp_armature.arp_secondary_type == "ADDITIVE" or arp_armature.arp_secondary_type == "TWIST_BASED"):
         print("  Push bend bones...")
 
@@ -5394,6 +5546,9 @@ def _set_humanoid_rig(armature_name, armature_add_name, manual_set_debug, self):
     humanoid_armature['set'] = True
     humanoid_armature['binded'] = True
 
+    # tag the rig as set for humanoid
+    arp_armature['arp_export_rig_set'] = humanoid_armature.name
+            
     print("  Humanoid set.")
     #Done _set_humanoid_rig()
 
@@ -5554,7 +5709,9 @@ def spline_ik_export_to_dict(name, side, dict):
                     b_parent = ebone.parent.parent.name
 
         elif type == '2':
+            #print('spline type 2')
             b_parent = 'c_'+name+'_'+prev_id+side
+            #print('b_parent', b_parent)
             if i == 1:
                 if ebone.parent.parent.parent == None:# ebone<spline<c_spline_root<parent
                     b_parent = "c_traj"
@@ -5725,6 +5882,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                             print("  "+bone_match+" not in dict")
 
         else:# if not bone_parent_name.startswith("c_")
+            
             # Case where the user parented the custom bones to the twist bones, without exporting the twist bone!
             if not scn.arp_export_twist:
                 if "leg_twist" in bone_parent_name:
@@ -5736,7 +5894,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                         found = True
                 elif "thigh_twist" in bone_parent_name:
                     bone_match = bone_parent_name.replace("thigh_twist", "thigh_stretch")
-                    print(bone_match)
+                    #print(bone_match)
                     if is_bone_in_dict(bone_match):
                         print('    >Found matching parent: "' + bone_parent_name + '" > "' + bone_match + '"')
                         bone_parent_name = bone_match
@@ -5756,6 +5914,14 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                         bone_parent_name = bone_match
                         found = True
 
+        if not found:
+            # try with a 'c_' prefix
+            c_par = get_edit_bone('c_'+bone_parent_name)
+            if c_par:
+                bone_parent_name = 'c_'+bone_parent_name
+                found = True
+                
+        
         if not found:
             fallback_parent(bone_parent_name)
 
@@ -5885,10 +6051,9 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
 
             #Skulls
             for i in range(1,4):
-                if get_edit_bone("c_skull_0" + str(i) + dupli) != None:
-                    skull = get_edit_bone("c_skull_0" + str(i) + dupli)
-                    if is_deforming(skull.name):
-                        bones_coords[skull.name] = {"head":skull.head.copy(), "tail":skull.tail.copy(), "roll":skull.roll, "parent":skull.parent.name, "arp_bone":skull.name, "softlink":is_softlink_bone(skull.name)}
+                if get_edit_bone("c_skull_0" + str(i) + dupli):
+                    skull = get_edit_bone("c_skull_0" + str(i) + dupli)                    
+                    bones_coords[skull.name] = {"head":skull.head.copy(), "tail":skull.tail.copy(), "roll":skull.roll, "parent":skull.parent.name, "arp_bone":skull.name, "softlink":is_softlink_bone(skull.name)}
 
 
         # Facial
@@ -5935,8 +6100,11 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
 
             # Main facial bones
             bones_parent_dict = {}
-            for f_bone in ard.facial_deform + ["eyelid_top", "eyelid_bot"]:
+            facial_bones = ard.facial_deform + ["eyelid_top", "eyelid_bot"] + \
+            ard.get_variable_lips(dupli, type='CONTROLLER', no_side=True) + \
+            ard.get_variable_eyelids(dupli, type='CONTROLLER', no_side=True)
             
+            for f_bone in facial_bones:                
                 if f_bone.endswith('.x'):
                     bname = f_bone[:-2] + dupli
                     b = get_edit_bone(bname)
@@ -5956,10 +6124,11 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
             
             for bname in bones_parent_dict:
                 if "jawbone" in bname:
-                    if get_edit_bone("c_skull_01" + dupli):
+                    if get_edit_bone("c_skull_01"+dupli):
                         bones_parent_dict[bname] = "c_skull_01" + dupli
                     else:
                         bones_parent_dict[bname] = "head" + dupli
+                    
                 if "c_lips_bot" in bname:
                     bones_parent_dict[bname] = "jawbone" + dupli
                 if "c_lips_top" in bname:
@@ -5977,12 +6146,12 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                 if "tong_02" in bname:
                     bones_parent_dict[bname] = "tong_01" + dupli
                 if "tong_03" in bname:
-                    bones_parent_dict[bname] = "tong_02" + dupli
-
-                if "eyelid" in bname and not ("_01" in bname or "_02" in bname or '_03' in bname or '_corner_' in bname):
+                    bones_parent_dict[bname] = "tong_02" + dupli                
+           
+                #if "eyelid" in bname and not ("_01" in bname or "_02" in bname or '_03' in bname or '_corner_' in bname):
+                if bname == 'eyelid_top'+dupli[:-2]+bname[-2:] or bname == 'eyelid_bot'+dupli[:-2]+bname[-2:]:                    
                     bones_parent_dict[bname] = "c_eye_offset" + dupli[:-2] + bname[-2:]
-
-
+                
                 if "c_eye_ref_track" in bname:
                     bones_parent_dict[bname] = "c_eye_offset" + dupli[:-2] + bname[-2:]
                 if "c_teeth_top" in bname:
@@ -5995,7 +6164,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
 
                 ebone = get_edit_bone(bname)
                 bones_coords[bname] = {"head":ebone.head.copy(), "tail":ebone.tail.copy(), "roll":ebone.roll, "parent":bones_parent_dict[bname], "arp_bone":ebone.name, "softlink":is_softlink_bone(ebone.name)}
-                print("Register FACIAL BONE", bname)
+                #print("Register FACIAL BONE", bname)
 
         # Ears
         # Multi-limb support
@@ -6018,7 +6187,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                         b_parent = ebone.parent.name
                         #if scn.arp_keep_bend_bones and (arp_armature.arp_secondary_type == "ADDITIVE" or arp_armature.arp_secondary_type == "TWIST_BASED"):
                         #    b_parent = "spine_02_bend.x"
-                        print("SAVE BREAST PARENT", b_parent)
+                        #print("SAVE BREAST PARENT", b_parent)
                         bones_coords[ebone.name] = {"head":ebone.head.copy(), "tail":ebone.tail.copy(), "roll":ebone.roll, "parent":b_parent, "arp_bone":ebone.name, "softlink":is_softlink_bone(ebone.name)}
 
         # Bottoms
@@ -6414,7 +6583,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
         for b in bones_coords:
             arp_bone_name = bones_coords[b]["arp_bone"]
             if arp_bone_name not in self.selected_bone_names:
-                print(arp_bone_name, "not found, pop!")
+                #print(arp_bone_name, "not found, pop!")
                 to_pop.append(b)
 
         for i in to_pop:
@@ -6458,7 +6627,7 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
     print("  Create bones...")
     bpy.ops.object.mode_set(mode='EDIT')
 
-    for bone_name in bones_coords:
+    for bone_name in bones_coords:     
         new_bone = mped_armature.data.edit_bones.new(bone_name)
         new_bone.head = bones_coords[bone_name]["head"]
         new_bone.tail = bones_coords[bone_name]["tail"]
@@ -6668,7 +6837,6 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                             sbtgt = bone_name
 
                     cns1, cns2 = add_copy_transf(pbone, tar=arp_armature, subtar=sbtgt, no_scale=bone_softlink)
-
 
                 if "arm_stretch" in bone_name and not "forearm" in bone_name:
                     if not bone_name.startswith("c_") and not bone_softlink:# if softlink, we need to keep the actual thigh stretch position:
@@ -6929,8 +7097,8 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
                 print("  No action to create")
 
 
-    #Push the bend bones?
-    if scn.arp_keep_bend_bones and scn.arp_push_bend and (arp_armature.arp_secondary_type == "ADDITIVE" or arp_armature.arp_secondary_type == "TWIST_BASED"):
+    #Push the bend bones?a
+    if scn.arp_keep_bend_bones and scn.arp_push_bend and arp_armature.arp_secondary_type == "ADDITIVE":# or arp_armature.arp_secondary_type == "TWIST_BASED"):
         for _action in bpy.data.actions:
 
             if not check_id_root(_action):
@@ -6942,6 +7110,9 @@ def _set_mped_rig(armature_name, armature_add_name, manual_set_debug, self):
     bpy.data.armatures[mped_armature.data.name].pose_position = 'POSE'
     mped_armature['set'] = True
     mped_armature['binded'] = True
+    
+    # tag the rig as set for humanoid
+    arp_armature['arp_export_rig_set'] = mped_armature.name
 
     print("\nMped rig built.")
 
@@ -6985,14 +7156,12 @@ def _constraint_rig(state):
 
     baked_armature['binded'] = not state
 
-"""
-# disable for now
-# eventhough Unity doesn't really support humanoid twist bones by default, let it be free user choice
+
 def update_engine_type(self, context):
-    if context.scene.arp_engine_type == "unity":
-        if context.scene.arp_export_rig_type != "mped":
-            context.scene.arp_export_twist = False
-"""
+    scn = context.scene
+    if scn.arp_engine_type == "unreal":  
+        scn.arp_export_bake_axis_convert = False
+
 
 def update_only_active(self, context):
     scn = context.scene
@@ -7101,7 +7270,7 @@ def rename_custom(self):
     fp = bpy.path.abspath(scn.arp_rename_fp)
     
     try:
-        file = open(fp, 'rU')
+        file = open(fp, 'r') if sys.version_info >= (3, 11) else open(fp, 'rU')
     except:
         print('')
         print('Rename file path:', fp)
@@ -7318,11 +7487,11 @@ class ARP_PT_auto_rig_GE_panel(Panel):
         if object:
             if object.type == "ARMATURE":
                 if 'arp_locked' in object.data.keys():
-                    col = layout.column(align=True)
-                    col.label(text='Locked rig',  icon='LOCKED')
-                    col.label(text='Rig not exportable with Auto-Rig Pro')
-
-                    return
+                    if object.data['arp_locked'] == True:
+                        col = layout.column(align=True)
+                        col.label(text='Locked rig',  icon='LOCKED')
+                        col.label(text='Rig not exportable with Auto-Rig Pro')
+                        return
 
         #BUTTONS
         col = layout.column(align=True)
@@ -7340,29 +7509,37 @@ class ARP_PT_auto_rig_GE_panel(Panel):
         row = col.row(align=True).split(factor=0.75, align=True)
         row.operator("arp.set_softlink_bones", text="Set Soft-Link Bones")
         row.operator("arp.unset_softlink_bones", text="Unset")
-        col.label(text='Rename Bones from File')
+        
+        col.label(text='Rename Bones from File:')
         col.prop(scn, 'arp_rename_fp', text='')
         
-        col.label(text='Custom Export Script')
+        col.label(text='Custom Export Script:')
         col.prop(scn, 'arp_custom_export_script', text='')
         
+        col = layout.column()
+        col.operator('arp.show_retro_options_ge', text="Legacy...", icon='SETTINGS')
         layout.separator()
 
         col = layout.column()
         col.operator(ARP_OT_GE_export_fbx_panel.bl_idname, text="Export FBX...")
+        if bpy.app.version >= (3, 4, 0):
+            col.operator(ARP_OT_GE_export_gltf_panel.bl_idname, text="Export GLTF...")
         col.scale_y = 1.2
         layout.separator()
         layout.prop(scn, "arp_show_ge_debug")
 
         if scn.arp_show_ge_debug:
             col = layout.column(align=True)
-            col.label(text="Tools below are for debugging")
-            col.label(text="purposes only. Warning, destructive!")
-            col.separator()
-            col = layout.column(align=True)
-            #col.operator("id.unset_humanoid_rig", text="Unset")
-            col.operator("id.set_humanoid_rig", text="Set Humanoid Rig")
-            col.operator("id.set_mped_rig", text="Set Mped Rig")
+            col.label(text="Warning, breaks Auto-Rig Pro edit")
+            col.label(text="and export tools, use with care")
+            #col.separator()
+            #col = layout.column(align=True)
+            #col.operator("id.unset_export_rig", text="Unset")
+            if 'arp_export_rig_set' in object.keys():
+                col.operator("id.unset_export_rig", text="Unset Export Rig", icon='X')
+            else:
+                col.operator("id.set_humanoid_rig", text="Set Humanoid Rig")
+                col.operator("id.set_mped_rig", text="Set Universal Rig")
             #col.operator("id.set_standard_scale", text="Blender Units")
             layout.separator()
 
@@ -7401,15 +7578,432 @@ def is_arp_armature(obj):
     if obj.type == "ARMATURE":
         if obj.data.bones.get("c_traj"):
             return True
+    return False
+    
+    
+def export_panel_invoke(self, context, event):
+    scn = context.scene
+
+    # Check if the armature is selected
+    for obj in context.selected_objects:
+        if obj.type == "ARMATURE":
+            self.rig = obj
+
+    if self.rig == None:
+        # maybe the object is active but not stored in 'selected_objects', weirdly
+        if bpy.context.active_object:
+            if bpy.context.active_object.type == "ARMATURE":
+                self.rig = bpy.context.active_object
+
+    if self.rig == None:
+        self.report({'ERROR'}, "Select the armature")
+        return {'FINISHED'}
+
+    self.is_arp_armature = is_arp_armature(self.rig)
+
+    # force Universal export for non ARP armatures
+    if not self.is_arp_armature:
+        scn.arp_export_rig_type = 'mped'
+        scn.arp_ue_root_motion = False        
+    
+    if scn.arp_ge_fp == '':# default file path
+        self.filepath = bpy.path.basename(bpy.context.blend_data.filepath)[:-6] + self.filename_ext
+    else:# restore file path from previous export
+        self.filepath = scn.arp_ge_fp
+        
+    context.window_manager.fileselect_add(self)
+
+    return {'RUNNING_MODAL'}
+    
+    
+def export_panel_draw(self, context):
+    layout = self.layout
+    object = context.active_object
+    scn = context.scene
+
+    rig = self.rig
+
+    def anim_export_ui():
+        box = layout.box()
+        col = box.column(align=False)
+        col.prop(scn, "arp_bake_anim")
+
+        if scn.arp_bake_anim == False:
+            return
+
+        col.prop(scn, 'arp_bake_type')
+
+        if scn.arp_bake_type == 'ACTIONS':
+            #if self.export_format == 'FBX':
+            col.prop(scn, 'arp_export_separate_fbx', text='As Multiple '+self.export_format+' Files')
+            if scn.arp_export_separate_fbx:
+                row = col.row(align=True).split(factor=0.4)
+                row.label(text="File Names:")
+                row.prop(scn, "arp_export_file_separator", text="")
+
+        col = box.column(align=True)
+        
+     
+        row = col.row(align=True).split(factor=0.4)
+        row.label(text="Frame Range:")
+        row.prop(scn, "arp_frame_range_type", text="")
+        if scn.arp_frame_range_type == "CUSTOM":
+            row = col.row(align=True)
+            row.prop(scn, "arp_export_start_frame")
+            row.prop(scn, "arp_export_end_frame")
+        elif scn.arp_frame_range_type == "SCENE":
+            row = col.row(align=True)
+            row.label(text='Start: '+str(scn.frame_start)+' End: '+str(scn.frame_end))
+                
+        if self.export_format == 'FBX':
+            col.separator()
+
+            row = col.row(align=True).split(factor=0.4)
+            row.label(text="Action Names:")
+            row.prop(scn, "arp_export_act_name", text="")
+
+            col = box.column(align=True)
+            col.prop(scn, "arp_simplify_fac")
+
+        if scn.arp_bake_type == 'NLA':
+            return
+
+        col.separator()
+        col.prop(scn, 'arp_export_use_actlist', text='Actions Manager')
+
+        if scn.arp_export_use_actlist:
+            row = layout.row(align=True)
+            row.template_list("ARP_UL_actions_list", "", scn, "arp_export_actlist", scn, "arp_export_actlist_idx", rows=5)
+            col = row.column(align=True)
+            col.operator(ARP_OT_actions_list_add.bl_idname, text="", icon="ADD")
+            col.operator(ARP_OT_actions_list_remove.bl_idname, text="", icon="REMOVE")
+            col.separator()
+            col.separator()
+            col.separator()
+            col.separator()
+            col.separator()
+            col.separator()
+            col.operator(ARP_OT_actions_list_move.bl_idname, text="", icon="TRIA_UP").direction = 'UP'
+            col.operator(ARP_OT_actions_list_move.bl_idname, text="", icon="TRIA_DOWN").direction = 'DOWN'
+
+            if len(scn.arp_export_actlist):
+                col = layout.column(align=True)
+                col.prop_search(scn.arp_export_actlist[scn.arp_export_actlist_idx], "action_to_add", bpy.data, "actions", text="")
+                col.operator(ARP_OT_actions_list_add_action.bl_idname, text='Add Action', icon='PLUS')
+
+                current_actlist = scn.arp_export_actlist[scn.arp_export_actlist_idx]
+
+                if len(current_actlist.actions):
+                    col.separator() 
+                    list = [i.action.name for i in current_actlist.actions if i.action]
+                    list.sort()# sort alphabetically
+                    for act_name in list:      
+                        show_action_row_manager(col, act_name)
+
+        else:
+            row = col.row(align=True)
+            row.prop(scn, "arp_bake_only_active")
+
+            row = col.row(align=True)
+            row.prop(scn, "arp_only_containing", text="Only Containing:")
+
+            row1 = row.row()
+            row1.enabled = scn.arp_only_containing
+            row1.prop(scn, "arp_export_name_string", text="")
+            row.prop(scn, "arp_see_actions", text="", icon="HIDE_OFF")
+
+            # show actions list
+            if scn.arp_see_actions:
+                if len(bpy.data.actions) > 0:
+                    found_one_act = False
+                    for act in bpy.data.actions:
+
+                        if not check_id_root(act):
+                            continue
+
+                        show_it = True
+
+                        if scn.arp_bake_only_active:# only the active action
+                            if rig.animation_data == None:
+                                col.label(text="No active action")
+                                break
+
+                            else:
+                                if rig.animation_data.action == None:
+                                    col.label(text="No active action")
+                                    break
+                                elif act != rig.animation_data.action:
+                                    show_it = False
+
+                        if scn.arp_only_containing:
+                            if not scn.arp_export_name_string in act.name:
+                                show_it = False
+
+                        if show_it:
+                            show_action_row(col, act.name)
+                            found_one_act = True
+
+                    if found_one_act == False:
+                        col.label(text="No actions to export")
+
+                else:
+                    col.label(text="No actions to export")
+
+
+    #BUTTONS
+    col = layout.column(align=True)
+    if self.export_format == 'GLTF':
+        col.prop(scn, 'arp_ge_gltf_format')
+        col.separator()
+        
+    if self.is_arp_armature:
+        row = col.row(align=True)
+        row.prop(scn, "arp_engine_type", expand=True)
+
+        row = col.row(align=True)
+        row.prop(scn, "arp_export_rig_type", expand=True)
+
+        col.separator()
+        if '2.80' in blender_version:
+            icon_check = 'CHECKBOX_HLT'
+        else:
+            icon_check = 'CHECKMARK'
+        col.operator("arp.check_rig_export", text="Check Rig", icon=icon_check)
+        col.operator("arp.fix_rig_export", text="Fix Rig")
+
+    col.separator()
+    row = col.row(align=True)
+    row.prop(scn, 'arp_export_show_panels', expand=True)
+
+    if scn.arp_export_rig_type == 'humanoid':
+        if scn.arp_export_show_panels == "RIG":
+            col.separator()
+            col.prop(scn, "arp_ge_sel_only")
+            col.prop(scn, "arp_ge_sel_bones_only")
+            box = layout.box()
+            box.label(text="Rig Definition:")
+            col = box.column(align=True)
+            row = col.row(align=True)
+            row.prop(scn,"arp_keep_bend_bones")
+            row1 = row.row()
+            if scn.arp_keep_bend_bones:
+                row1.enabled = True
+            else:
+                row1.enabled = False
+
+            row1.prop(scn,"arp_push_bend")
+
+            row = col.row(align=True)
+            row.prop(scn,"arp_full_facial")
+            row.prop(scn,"arp_export_twist")
+            col = box.column(align=True)
+            row = col.row(align=True)
+            if not scn.arp_export_twist:
+                row.enabled = False
+            else:
+                row.enabled = True
+            
+            row.prop(scn, "arp_twist_fac", slider=True)
+            
+            col = box.column(align=True)
+            col.prop(scn, "arp_export_noparent", text="No Parents (allow animated stretch)")
+            
+            col.prop(scn, "arp_export_renaming", text="Rename Bones")                
+            
+            box = layout.box()
+            box.label(text="Units:")
+            col = box.column(align=True)            
+            col_sub = col.column()
+            
+            if self.export_format == 'FBX':
+                if scn.arp_engine_type == 'unity':
+                    col.prop(scn, 'arp_export_bake_axis_convert')
+                col_sub.prop(scn, "arp_units_x100")
+                col_sub.enabled = not scn.arp_export_bake_axis_convert
+            elif self.export_format == 'GLTF':
+                col_sub.prop(scn, 'arp_ge_gltf_unitsx100')
+            
+            
+            box = layout.box()
+            box.label(text="Root Motion:")
+            col = box.column(align=True)             
+            col.prop(scn, "arp_ue_root_motion")
+            
+            
+            if scn.arp_engine_type == "unreal":
+                box = layout.box()
+                box.label(text="Unreal Options:")
+                col = box.column(align=True)
+
+                row = col.row(align=True)
+                row.prop(scn, "arp_ue4", text="UE4 Legacy")# TODO...
+
+                row.prop(scn, "arp_rename_for_ue")
+
+                row = col.row(align=True)
+                row.prop(scn, "arp_ue_ik")
+
+                row1 = row.row(align=True)
+                row1.enabled = scn.arp_rename_for_ue
+                row1.prop(scn, "arp_mannequin_axes", text="Mannequin Axes")
+
+                row = col.row(align=True)
+                row.enabled = scn.arp_ue_ik
+                row.prop(scn, "arp_ue_ik_anim", text="Anim. IK Bones")
+
+                if scn.arp_mannequin_axes:
+                    if scn.arp_ue4:# old UE4 mannequin skeleton legacy
+                        if rig.data.bones.get("c_spine_03.x") == None:
+                            col.label(text="4 spine bones are required to match")
+                            col.label(text="UE Mannequin hierarchy!")
+                    else:
+                        missing = False
+                        if rig.data.bones.get("c_spine_05.x") == None:
+                            col.label(text="6 spine bones")
+                            missing = True
+                        if rig.data.bones.get("c_subneck_1.x") == None:
+                            col.label(text="and 2 neck bones")
+                            missing = True
+                        
+                        if missing:
+                            col.label(text='are required to match the')
+                            col.label(text="UE Mannequin hierarchy!")                                
+                        
+                        
+
+        if scn.arp_export_show_panels == "ANIM":
+            anim_export_ui()
+
+    if scn.arp_export_rig_type == 'mped':
+        if scn.arp_export_show_panels == "RIG":
+            col.separator()
+            col.prop(scn, "arp_ge_sel_only")
+            col.prop(scn, "arp_ge_sel_bones_only")
+            box = layout.box()
+            box.label(text="Rig Definition:")
+            col = box.column(align=True)
+            row = col.row(align=True)
+            row.prop(scn,"arp_keep_bend_bones")
+            row1 = row.row()
+            if scn.arp_keep_bend_bones:
+                row1.enabled = True
+            else:
+                row1.enabled = False
+
+            row1.prop(scn,"arp_push_bend")
+
+            row = col.row(align=True)
+            row.prop(scn,"arp_export_twist")
+
+            col = box.column(align=True)
+            row = col.row(align=True)
+            if not scn.arp_export_twist:
+                row.enabled = False
+            else:
+                row.enabled = True
+
+            row.prop(scn, "arp_twist_fac", slider=True)
+
+            col = box.column(align=True)
+            col.prop(scn,"arp_export_noparent", text="No Parents (allow animated stretch)")
+            
+            col.prop(scn, "arp_export_renaming", text="Rename Bones")
+
+            box = layout.box()
+            box.label(text="Units:")
+            col = box.column(align=True)            
+            col_sub = col.column()
+            
+            if self.export_format == 'FBX':
+                if scn.arp_engine_type == 'unity':
+                    col.prop(scn, 'arp_export_bake_axis_convert')
+                col_sub.prop(scn, "arp_units_x100")
+                col_sub.enabled = not scn.arp_export_bake_axis_convert
+            elif self.export_format == 'GLTF':
+                col_sub.prop(scn, 'arp_ge_gltf_unitsx100')            
+
+            if self.is_arp_armature:
+                box = layout.box()
+                box.label(text="Root Motion:")
+                col = box.column(align=True)                 
+                col.prop(scn, "arp_ue_root_motion")
+
+        if scn.arp_export_show_panels == "ANIM":
+            anim_export_ui()
+
+    if scn.arp_export_show_panels == "MISC":
+        box = layout.box()
+        col = box.column(align=True)
+        col.prop(scn, "arp_global_scale")
+        col = box.column(align=True)
+        
+        if self.export_format == 'FBX':
+            col.label(text="Smoothing:")
+            col.prop(scn, "arp_mesh_smooth_type", text="")
+            col.prop(scn, "arp_use_tspace")
+        elif self.export_format == 'GLTF':
+            col.prop(scn, 'arp_use_tspace', text='Vertex Tangents')
+            col.prop(scn, 'arp_ge_gltf_all_inf')
+            col.prop(scn, 'arp_ge_gltf_sk_normals', text='Shape Keys Normals')
+            col.prop(scn, 'arp_ge_gltf_sk_tangents', text='Shape Keys Tangents')
+            
+        
+        col.separator()
+        col.label(text='Modifiers:')
+        col.prop(scn, "arp_apply_mods", text="Apply Modifiers")
+        col1 = col.column(align=True)
+        col1.enabled = scn.arp_apply_mods
+        col1.prop(scn, "arp_apply_subsurf", text="Apply Subsurf")        
+        
+        if self.export_format == 'FBX':
+            col = box.column()
+            col.label(text='Debug:')
+            row = col.row()
+            row.prop(scn, "arp_fix_fbx_rot")
+            row.prop(scn, "arp_fix_fbx_matrix")
+
+            if scn.arp_engine_type == 'unity' or self.is_arp_armature == False:
+                row = col.row()
+                row.prop(scn, 'arp_ge_add_dummy_mesh')
+                row = col.row()
+                row.prop(scn, 'arp_ge_force_rest_pose_export')
+        
+        col = box.column(align=True)
+        col.label(text='Axes:')
+        col_sub = col.column(align=True) 
+        if self.export_format == 'FBX':
+            if scn.arp_engine_type == 'unity':
+                col.prop(scn, "arp_export_bake_axis_convert", text='Bake Axis Conversion')        
+            col_sub.enabled = not scn.arp_export_bake_axis_convert
+            
+        col_sub.prop(scn, "arp_init_fbx_rot")
+        col_sub2 = col_sub.column(align=True)
+        col_sub2.prop(scn, "arp_init_fbx_rot_mesh")
+        col_sub2.enabled = scn.arp_init_fbx_rot
+        
+        col = box.column(align=True) 
+        if self.export_format == 'FBX':
+            col.separator()
+            col.label(text="Bones Axes:")
+            col.prop(scn, "arp_bone_axis_primary_export", text="Primary")
+            col.prop(scn, "arp_bone_axis_secondary_export", text="Secondary")
+
+        col.separator()
+        col.label(text="Rig Name:")
+        col.prop(scn, "arp_export_rig_name", text="")
+
+        col.separator()
+        col.prop(scn, 'arp_export_tex', text='Embed Textures')
 
 
 class ARP_OT_GE_export_fbx_panel(Operator, ExportHelper):
-    """Export the Auto-Rig Pro character in Fbx file format"""
+    """Export the rigged character in Fbx file format"""
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_label = "Auto-Rig Pro FBX Export"
     bl_idname = "id.arp_export_fbx_panel"
-
+    
+    export_format = 'FBX'
     filepath: StringProperty(subtype="FILE_PATH", default='untitled')
     filename_ext = ".fbx"
     filter_glob : StringProperty(default="*.fbx", options={'HIDDEN'})
@@ -7420,359 +8014,40 @@ class ARP_OT_GE_export_fbx_panel(Operator, ExportHelper):
 
 
     def invoke(self, context, event):
-        scn = context.scene
-
-        # Check if the armature is selected
-        for obj in context.selected_objects:
-            if obj.type == "ARMATURE":
-                self.rig = obj
-
-        if self.rig == None:
-            # maybe the object is active but not stored in 'selected_objects', weirdly
-            if bpy.context.active_object:
-                if bpy.context.active_object.type == "ARMATURE":
-                    self.rig = bpy.context.active_object
-
-        if self.rig == None:
-            self.report({'ERROR'}, "Select the armature")
-            return {'FINISHED'}
-
-        self.is_arp_armature = is_arp_armature(self.rig)
-
-        # force Universal export for non ARP armatures
-        if not self.is_arp_armature:
-            scn.arp_export_rig_type = 'mped'
-            scn.arp_ue_root_motion = False
-
-        self.filepath = bpy.path.basename(bpy.context.blend_data.filepath)[:-6] + self.filename_ext
-        context.window_manager.fileselect_add(self)
-
-        return {'RUNNING_MODAL'}
-
+        return export_panel_invoke(self, context, event)
+        
 
     def draw(self, context):
-        layout = self.layout
-        object = context.active_object
-        scn = context.scene
-
-        rig = self.rig
-
-        def anim_export_ui():
-            box = layout.box()
-            col = box.column(align=False)
-            col.prop(scn, "arp_bake_anim")
-
-            if scn.arp_bake_anim == False:
-                return
-
-            col.prop(scn, 'arp_bake_type')
-
-            if scn.arp_bake_type == 'ACTIONS':
-                col.prop(scn, 'arp_export_separate_fbx', text='As Multiple Fbx Files')
-                if scn.arp_export_separate_fbx:
-                    row = col.row(align=True).split(factor=0.4)
-                    row.label(text="File Names:")
-                    row.prop(scn, "arp_export_file_separator", text="")
-
-            col = box.column(align=True)
-            row = col.row(align=True).split(factor=0.4)
-            row.label(text="Frame Range:")
-            row.prop(scn, "arp_frame_range_type", text="")
-            if scn.arp_frame_range_type == "CUSTOM":
-                row = col.row(align=True)
-                row.prop(scn, "arp_export_start_frame")
-                row.prop(scn, "arp_export_end_frame")
-            elif scn.arp_frame_range_type == "SCENE":
-                row = col.row(align=True)
-                row.label(text='Start: '+str(scn.frame_start)+' End: '+str(scn.frame_end))
-
-            col.separator()
-
-            row = col.row(align=True).split(factor=0.4)
-            row.label(text="Action Names:")
-            row.prop(scn, "arp_export_act_name", text="")
-
-            col = box.column(align=True)
-            col.prop(scn, "arp_simplify_fac")
-
-            if scn.arp_bake_type == 'NLA':
-                return
-
-            col.separator()
-            col.prop(scn, 'arp_export_use_actlist', text='Actions Manager')
-
-            if scn.arp_export_use_actlist:
-                row = layout.row(align=True)
-                row.template_list("ARP_UL_actions_list", "", scn, "arp_export_actlist", scn, "arp_export_actlist_idx", rows=5)
-                col = row.column(align=True)
-                col.operator(ARP_OT_actions_list_add.bl_idname, text="", icon="ADD")
-                col.operator(ARP_OT_actions_list_remove.bl_idname, text="", icon="REMOVE")
-                col.separator()
-                col.separator()
-                col.separator()
-                col.separator()
-                col.separator()
-                col.separator()
-                col.operator(ARP_OT_actions_list_move.bl_idname, text="", icon="TRIA_UP").direction = 'UP'
-                col.operator(ARP_OT_actions_list_move.bl_idname, text="", icon="TRIA_DOWN").direction = 'DOWN'
-
-                if len(scn.arp_export_actlist):
-                    col = layout.column(align=True)
-                    col.prop_search(scn.arp_export_actlist[scn.arp_export_actlist_idx], "action_to_add", bpy.data, "actions", text="")
-                    col.operator(ARP_OT_actions_list_add_action.bl_idname, text='Add Action', icon='PLUS')
-
-                    current_actlist = scn.arp_export_actlist[scn.arp_export_actlist_idx]
-
-                    if len(current_actlist.actions):
-                        col.separator()
-                        for act in current_actlist.actions:
-                            if act.action:# may be None
-                                show_action_row_manager(col, act.action.name)
+        export_panel_draw(self, context)
 
 
-            else:
-                row = col.row(align=True)
-                row.prop(scn, "arp_bake_only_active")
+    def execute(self, context):
+        return ARP_OT_export_fbx.execute(self, context)
+        
+        
+class ARP_OT_GE_export_gltf_panel(Operator, ExportHelper):
+    """Export the rigged character in Gltf/Glb file format"""
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_label = "Auto-Rig Pro GLTF Export"
+    bl_idname = "id.arp_export_gltf_panel"
 
-                row = col.row(align=True)
-                row.prop(scn, "arp_only_containing", text="Only Containing:")
-
-                row1 = row.row()
-                row1.enabled = scn.arp_only_containing
-                row1.prop(scn, "arp_export_name_string", text="")
-                row.prop(scn, "arp_see_actions", text="", icon="HIDE_OFF")
-
-                # show actions list
-                if scn.arp_see_actions:
-                    if len(bpy.data.actions) > 0:
-                        found_one_act = False
-                        for act in bpy.data.actions:
-
-                            if not check_id_root(act):
-                                continue
-
-                            show_it = True
-
-                            if scn.arp_bake_only_active:# only the active action
-                                if rig.animation_data == None:
-                                    col.label(text="No active action")
-                                    break
-
-                                else:
-                                    if rig.animation_data.action == None:
-                                        col.label(text="No active action")
-                                        break
-                                    elif act != rig.animation_data.action:
-                                        show_it = False
-
-                            if scn.arp_only_containing:
-                                if not scn.arp_export_name_string in act.name:
-                                    show_it = False
-
-                            if show_it:
-                                show_action_row(col, act.name)
-                                found_one_act = True
-
-                        if found_one_act == False:
-                            col.label(text="No actions to export")
-
-                    else:
-                        col.label(text="No actions to export")
+    export_format = 'GLTF'
+    filepath: StringProperty(subtype="FILE_PATH", default='untitled')
+    filename_ext = ".glb"
+    filter_glob : StringProperty(default="*.glb", options={'HIDDEN'})
+    message_final = ''
+    non_armature_actions = []
+    rig = None
+    is_arp_armature = True
 
 
-        #BUTTONS
-        col = layout.column(align=True)
+    def invoke(self, context, event):
+        return export_panel_invoke(self, context, event)
+        
 
-        if self.is_arp_armature:
-            row = col.row(align=True)
-            row.prop(scn, "arp_engine_type", expand=True)
-
-            row = col.row(align=True)
-            row.prop(scn, "arp_export_rig_type", expand=True)
-
-            col.separator()
-            if '2.80' in blender_version:
-                icon_check = 'CHECKBOX_HLT'
-            else:
-                icon_check = 'CHECKMARK'
-            col.operator("arp.check_rig_export", text="Check Rig", icon=icon_check)
-            col.operator("arp.fix_rig_export", text="Fix Rig")
-
-        col.separator()
-        row = col.row(align=True)
-        row.prop(scn, 'arp_export_show_panels', expand=True)
-
-        if scn.arp_export_rig_type == 'humanoid':
-            if scn.arp_export_show_panels == "RIG":
-                col.separator()
-                col.prop(scn, "arp_ge_sel_only")
-                col.prop(scn, "arp_ge_sel_bones_only")
-                box = layout.box()
-                box.label(text="Rig Definition:")
-                col = box.column(align=True)
-                row = col.row(align=True)
-                row.prop(scn,"arp_keep_bend_bones")
-                row1 = row.row()
-                if scn.arp_keep_bend_bones:
-                    row1.enabled = True
-                else:
-                    row1.enabled = False
-
-                row1.prop(scn,"arp_push_bend")
-
-                row = col.row(align=True)
-                row.prop(scn,"arp_full_facial")
-                row.prop(scn,"arp_export_twist")
-                col = box.column(align=True)
-                row = col.row(align=True)
-                if not scn.arp_export_twist:
-                    row.enabled = False
-                else:
-                    row.enabled = True
-                
-                row.prop(scn, "arp_twist_fac", slider=True)
-                
-                col = box.column(align=True)
-                col.prop(scn, "arp_export_noparent", text="No Parents (allow animated stretch)")
-                
-                col.prop(scn, "arp_export_renaming", text="Rename Bones")                
-                
-                box = layout.box()
-                box.label(text="Units:")
-                col = box.column(align=True)
-                row = col.row(align=True)
-                row.prop(scn, "arp_units_x100")
-                
-                box = layout.box()
-                box.label(text="Root Motion:")
-                col = box.column(align=True)             
-                col.prop(scn, "arp_ue_root_motion")
-                
-                
-                if scn.arp_engine_type == "unreal":
-                    box = layout.box()
-                    box.label(text="Unreal Options:")
-                    col = box.column(align=True)
-
-                    row = col.row(align=True)
-                    row.prop(scn, "arp_ue4", text="UE4 Legacy")# TODO...
-
-                    row.prop(scn, "arp_rename_for_ue")
-
-                    row = col.row(align=True)
-                    row.prop(scn, "arp_ue_ik")
-
-                    row1 = row.row(align=True)
-                    row1.enabled = scn.arp_rename_for_ue
-                    row1.prop(scn, "arp_mannequin_axes", text="Mannequin Axes")
-
-                    row = col.row(align=True)
-                    row.enabled = scn.arp_ue_ik
-                    row.prop(scn, "arp_ue_ik_anim", text="Anim. IK Bones")
-
-                    if scn.arp_mannequin_axes:
-                        if scn.arp_ue4:# old UE4 mannequin skeleton legacy
-                            if rig.data.bones.get("c_spine_03.x") == None:
-                                col.label(text="4 spine bones are required to match")
-                                col.label(text="UE Mannequin hierarchy!")
-                        else:
-                            missing = False
-                            if rig.data.bones.get("c_spine_05.x") == None:
-                                col.label(text="6 spine bones")
-                                missing = True
-                            if rig.data.bones.get("c_subneck_1.x") == None:
-                                col.label(text="and 2 neck bones")
-                                missing = True
-                            
-                            if missing:
-                                col.label(text='are required to match the')
-                                col.label(text="UE Mannequin hierarchy!")                                
-                            
-                            
-
-            if scn.arp_export_show_panels == "ANIM":
-                anim_export_ui()
-
-        if scn.arp_export_rig_type == 'mped':
-            if scn.arp_export_show_panels == "RIG":
-                col.separator()
-                col.prop(scn, "arp_ge_sel_only")
-                col.prop(scn, "arp_ge_sel_bones_only")
-                box = layout.box()
-                box.label(text="Rig Definition:")
-                col = box.column(align=True)
-                row = col.row(align=True)
-                row.prop(scn,"arp_keep_bend_bones")
-                row1 = row.row()
-                if scn.arp_keep_bend_bones:
-                    row1.enabled = True
-                else:
-                    row1.enabled = False
-
-                row1.prop(scn,"arp_push_bend")
-
-                row = col.row(align=True)
-                row.prop(scn,"arp_export_twist")
-
-                col = box.column(align=True)
-                row = col.row(align=True)
-                if not scn.arp_export_twist:
-                    row.enabled = False
-                else:
-                    row.enabled = True
-
-                row.prop(scn, "arp_twist_fac", slider=True)
-
-                col = box.column(align=True)
-                col.prop(scn,"arp_export_noparent", text="No Parents (allow animated stretch)")
-                
-                col.prop(scn, "arp_export_renaming", text="Rename Bones")
-
-                box = layout.box()
-                box.label(text="Units:")
-                col = box.column(align=True)
-                row = col.row(align=True)
-                row.prop(scn, "arp_units_x100")
-
-                if self.is_arp_armature:
-                    box = layout.box()
-                    box.label(text="Root Motion:")
-                    col = box.column(align=True)                 
-                    col.prop(scn, "arp_ue_root_motion")
-
-            if scn.arp_export_show_panels == "ANIM":
-                anim_export_ui()
-
-        if scn.arp_export_show_panels == "MISC":
-            box = layout.box()
-            col = box.column(align=True)
-            col.prop(scn, "arp_global_scale")
-            col = box.column(align=True)
-            col.label(text="Smoothing:")
-            col.prop(scn, "arp_mesh_smooth_type", text="")
-            col.prop(scn, "arp_use_tspace")
-            row = box.column().row()
-            row.prop(scn, "arp_fix_fbx_rot")
-            row.prop(scn, "arp_fix_fbx_matrix")
-            col = box.column(align=True)
-            col.prop(scn, "arp_init_fbx_rot")
-            col = col.column(align=True)
-            col.prop(scn, "arp_init_fbx_rot_mesh")
-            col.enabled = scn.arp_init_fbx_rot
-            col = box.column(align=True)
-            #if scn.arp_init_fbx_rot:
-            #    col.label(text="[Not compatible with Root Motion yet]")
-            col.separator()
-            col.label(text="Bones Axes:")
-            col.prop(scn, "arp_bone_axis_primary_export", text="Primary")
-            col.prop(scn, "arp_bone_axis_secondary_export", text="Secondary")
-
-            col.separator()
-            col.label(text="Rig Name:")
-            col.prop(scn, "arp_export_rig_name", text="")
-
-            col.separator()
-            col.prop(scn, 'arp_export_tex', text='Embed Textures')
+    def draw(self, context):
+        export_panel_draw(self, context)
 
 
     def execute(self, context):
@@ -7782,11 +8057,11 @@ class ARP_OT_GE_export_fbx_panel(Operator, ExportHelper):
 ##################  REGISTER  ##################
 
 classes = (ARP_OT_toggle_action, ARP_OT_delete_action, ARP_OT_set_mped_rig, ARP_OT_set_humanoid_rig,
-    ARP_OT_unset_humanoid_rig, ARP_OT_export_fbx, ARP_OT_bind_humanoid, ARP_OT_unbind_humanoid,
-    ARP_PT_auto_rig_GE_panel, ARP_OT_GE_export_fbx_panel, ARP_OT_GE_check_rig, ARP_OT_GE_fix_rig,
+    ARP_OT_unset_export_rig, ARP_OT_export_fbx, ARP_OT_bind_humanoid, ARP_OT_unbind_humanoid,
+    ARP_PT_auto_rig_GE_panel, ARP_OT_GE_export_fbx_panel, ARP_OT_GE_export_gltf_panel, ARP_OT_GE_check_rig, ARP_OT_GE_fix_rig,
     ARP_OT_GE_set_custom_bones, ARP_OT_GE_unset_custom_bones, ARP_OT_GE_set_softlink_bones, ARP_OT_GE_unset_softlink_bones,
     ActionItem, ActionsList, ARP_UL_actions_list, ARP_OT_actions_list_remove, ARP_OT_actions_list_add, ARP_OT_actions_list_move,
-    ARP_OT_actions_list_add_action, ARP_OT_actions_list_remove_action)
+    ARP_OT_actions_list_add_action, ARP_OT_actions_list_remove_action, ARP_OT_GE_show_retro)
 
 def update_arp_tab():
     try:
@@ -7811,7 +8086,7 @@ def register():
     bpy.types.Scene.arp_engine_type = EnumProperty(items=(
         ("unity", "Unity", "Export to Unity"),
         ("unreal", "Unreal Engine", "Export to Unreal Engine")
-        ), name = "Game Engine Type", description="Game engine to export the character")#, update=update_engine_type)
+        ), name = "Game Engine Type", description="Game engine to export the character", update=update_engine_type)
     bpy.types.Scene.arp_ue4 = BoolProperty(name="UE4", description='Export as a humanoid for UE4', default=False)#backward-compatibility                                                                                                                                   
     bpy.types.Scene.arp_rename_for_ue = BoolProperty(name="Rename for UE", description="Rename bones according to Unreal Engine humanoid names convention", default=False)
     bpy.types.Scene.arp_export_twist = BoolProperty(name='Export Twist', description="If enabled, twist bones are exported. If disabled, they're not exported and the twist weights are transferred to the main weights.\nIf multiple twist bones are used, this is enabled automatically", default=True)
@@ -7825,7 +8100,7 @@ def register():
     bpy.types.Scene.arp_ue_root_motion = BoolProperty(name='Root Motion', description='The "c_traj" controller animation will be baked to the root node for root motion in game engines', default=False)#, update=update_root_motion_btn)
     bpy.types.Scene.arp_only_containing = BoolProperty(name='Export Only Containing:', description='Export only actions with names containing the given text\ne.g. to export only actions associated to "Bob", name the actions "Bob_ActionName"' , default=False)
     bpy.types.Scene.arp_export_name_string = StringProperty(name="Text", description="Word/Text to be looked for in the actions name when exporting")
-    bpy.types.Scene.arp_units_x100 = BoolProperty(name='Units x100', description='Export with a x100 unit scale factor. This ensures retargetting in Unreal Engine and the rig scale set to 1.0 in Unity' , default=True)
+    bpy.types.Scene.arp_units_x100 = BoolProperty(name='Units x100', description='Export with a x100 unit scale factor. This ensures retargetting in Unreal Engine and the rig scale set to 1.0 in Unity', default=True)
     bpy.types.Scene.arp_bake_anim = BoolProperty(name='Bake Animations', description='If the character is animated, bake animations' , default=True)
     bpy.types.Scene.arp_bake_type = EnumProperty(items=(('ACTIONS', 'Actions', 'Bake each action as a separate animation track'), ('NLA', 'NLA', 'Bake a global animation track')), description='Bake individual actions or a global animation track', default='ACTIONS', name='Type', update=update_bake_type)
     bpy.types.Scene.arp_frame_range_type = EnumProperty(items=(('FULL', 'All', 'Export all frames'), ('CUSTOM', 'Custom', 'Export using given start/end frames'), ('SCENE', 'Scene', 'Export using start/end frames as set in the output tab'), ('MARKERS', 'Markers', 'Export frames within "Start" and "End" markers\nIf the action has no markers, all frames are exported')), name='Frame Range Type', default='FULL', update=update_bake_type)
@@ -7843,11 +8118,11 @@ def register():
     bpy.types.Scene.arp_fix_fbx_matrix = BoolProperty(name='Fix Matrices', description='Use an alternative method to evaluate the bones matrices, to prevent shaky bones' , default=True)
     bpy.types.Scene.arp_init_fbx_rot = BoolProperty(name='Initialize Fbx Armature Rotation', description='Export armature with rotations values set to 0', default = False)#, update=update_init_rot_btn)
     bpy.types.Scene.arp_init_fbx_rot_mesh = BoolProperty(name='Initialize Fbx Meshes Rotation', description='Export meshes with rotations values set to 0', default=False)
-    bpy.types.Scene.arp_export_tex = BoolProperty(name='Embed Textures', description='Embed textures, use copy path mode', default=False)
+    bpy.types.Scene.arp_export_tex = BoolProperty(name='Embed Textures', description='Embed textures in Fbx file, use copy path mode.\nMay not work if shaders are not Princpled BSDF shaders', default=True)
     bpy.types.Scene.arp_ge_sel_only = BoolProperty(name='Selected Objects Only', description='Export only selected objects, instead of exporting all skinned meshes' , default=False)
     bpy.types.Scene.arp_ge_sel_bones_only = BoolProperty(name='Selected Bones Only', description='Export only selected bones (only deforming bones must be selected)' , default=False)
     bpy.types.Scene.arp_see_actions =  BoolProperty(name='Display Actions', description='Show exported actions' , default=True)
-    bpy.types.Scene.arp_show_ge_debug = BoolProperty(name="Show Debug Tools", description="Show Game Engine export debug tools", default=False)
+    bpy.types.Scene.arp_show_ge_debug = BoolProperty(name="Show Extras", description="Show Game Engine export extra and debug tools", default=False)
     bpy.types.Scene.arp_export_noparent = BoolProperty(name="No Parent", description="Allow correct export of bones stretch/scale by exporting a flat hierarchy (no parenting).\nWarning, it breaks retargetting features in game engines since the bones hierarchy is not preserved", default=False)
     bpy.types.Scene.arp_export_show_panels = EnumProperty(name="Panel Type", items=(('RIG', "Rig", ""), ('ANIM', "Animations", ""),('MISC', "Misc", "")),default='RIG')
     bpy.types.Scene.arp_export_rig_name = StringProperty(name="Rig Name", default="root", description="Name of the exported skeleton")
@@ -7870,7 +8145,28 @@ def register():
     bpy.types.Scene.arp_export_renaming = BoolProperty(default=False, description='Rename exported bones from file (see filepath in the Auto-Rig Pro: Export tab)')
     bpy.types.Scene.arp_rename_fp = bpy.props.StringProperty(name='Rename Path', subtype='FILE_PATH', default='//', description='Path to the file to rename bones')    
     bpy.types.Scene.arp_custom_export_script = bpy.props.StringProperty(name="Custom Export Script", subtype='FILE_PATH', default='//', description='Path to the custom script instructions for export')
-
+    bpy.types.Scene.arp_apply_mods = BoolProperty(default=True, description='Apply modifiers when exporting. \nShape Keys are supported. Lots of shapes may increase export time, works only if the amount of verts remains constant for each shape')
+    bpy.types.Scene.arp_apply_subsurf = BoolProperty(default=False, description='Apply the Subsurf modifier as well')
+    bpy.types.Scene.arp_retro_ge_UE_twist_pos = BoolProperty(default=False, description='Old incorrect twist bones position when exporting for Unreal Engine humanoid')
+    bpy.types.Scene.arp_export_bake_axis_convert = BoolProperty(default=False, name='Bake Axis Conversion', description='Export with scale and axes settings to comply with Unity Bake Axis Conversion setting')
+    bpy.types.Scene.arp_ge_add_dummy_mesh = BoolProperty(default=True, name="Add Dummy Mesh", description='Add a blank mesh object with no vertices when the skeleton only is exported, to prevent import issues.\nAutomatically enabled when exporting to UE, since skeleton without meshes cannot be imported in UE')
+    bpy.types.Scene.arp_ge_force_rest_pose_export = BoolProperty(default=False, name="Force Rest Pose Export", description='Export the bind/rest pose even if only the skeleton is exported, without meshes.')
+    bpy.types.Scene.arp_ge_fp = StringProperty(subtype="FILE_PATH", default='')
+    bpy.types.Scene.arp_ge_gltf_format = EnumProperty(name='Format', items=(('GLB', 'glTF Binary (.glb)',
+                'Exports a single file, with all data packed in binary form. '
+                'Most efficient and portable, but more difficult to edit later'),
+               ('GLTF_SEPARATE', 'glTF Separate (.gltf + .bin + textures)',
+                'Exports multiple files, with separate JSON, binary and texture data. '
+                'Easiest to edit later'),
+                ('GLTF_EMBEDDED', 'glTF Embedded (.gltf)',
+                 'Exports a single file, with all data packed in JSON. '
+                 'Less efficient than binary, but easier to edit later')),
+        description=('Output format and embedding options. Binary is most efficient, but JSON (embedded or separate) may be easier to edit later'), default='GLB')
+    bpy.types.Scene.arp_ge_gltf_all_inf = BoolProperty(default=False, name='Include All Bones Influences', description='If disabled, will clamp the bones influence to max 4. If enabled, infinite')
+    bpy.types.Scene.arp_ge_gltf_sk_normals = BoolProperty(default=True, name='Shape Key Normals', description='Export vertex normals with shape keys (morph targets)')   
+    bpy.types.Scene.arp_ge_gltf_sk_tangents = BoolProperty(default=False, name='Shape Key Tangents', description='Export vertex tangents with shape keys (morph targets)')
+    bpy.types.Scene.arp_ge_gltf_unitsx100 = BoolProperty(default=False, name='Units x100', description='Export with a x100 unit scale factor')
+    
 
 def unregister():
     from bpy.utils import unregister_class
@@ -7927,3 +8223,15 @@ def unregister():
     del bpy.types.Scene.arp_export_renaming
     del bpy.types.Scene.arp_rename_fp
     del bpy.types.Scene.arp_custom_export_script
+    del bpy.types.Scene.arp_apply_mods
+    del bpy.types.Scene.arp_apply_subsurf
+    del bpy.types.Scene.arp_retro_ge_UE_twist_pos
+    del bpy.types.Scene.arp_export_bake_axis_convert
+    del bpy.types.Scene.arp_ge_add_dummy_mesh
+    del bpy.types.Scene.arp_ge_force_rest_pose_export
+    del bpy.types.Scene.arp_ge_fp
+    del bpy.types.Scene.arp_ge_gltf_format
+    del bpy.types.Scene.arp_ge_gltf_all_inf
+    del bpy.types.Scene.arp_ge_gltf_sk_normals
+    del bpy.types.Scene.arp_ge_gltf_sk_tangents
+    del bpy.types.Scene.arp_ge_gltf_unitsx100

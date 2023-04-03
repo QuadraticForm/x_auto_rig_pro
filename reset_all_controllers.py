@@ -28,7 +28,7 @@ def set_inverse_child(b, cns):
         if bpy.context.active_object.data.bones.get(cns.subtarget):           
             cns.inverse_matrix = bpy.context.active_object.pose.bones[cns.subtarget].matrix.inverted()	
     else:
-        print("Child Of constraint could not be reset, bone does not exist:", cns.subtarget, cns.name)
+        print("Child Of constraint could not be reset, bone does not exist:", '"'+cns.subtarget+'" from', cns.name)      
         
              
 def is_reset_bone(bone_name):    

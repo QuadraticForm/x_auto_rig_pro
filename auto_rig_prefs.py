@@ -22,11 +22,13 @@ class ARP_MT_arp_addon_preferences(bpy.types.AddonPreferences):
     default_ikfk_arm: bpy.props.EnumProperty(items=(('IK', 'IK', 'IK'), ('FK', 'FK', 'FK')), description='Default value for arms IK-FK switch', name='IK-FK Arms Default')
     default_ikfk_leg: bpy.props.EnumProperty(items=(('IK', 'IK', 'IK'), ('FK', 'FK', 'FK')), description='Default value for legs IK-FK switch', name='IK-FK Legs Default')
     default_head_lock: bpy.props.BoolProperty(default=True, name='Head Lock Default', description='Default value for the Head Lock switch')
-    
+    remove_existing_arm_mods: bpy.props.BoolProperty(default=True, name='Remove Armature Modifiers', description='Remove existing armature modifiers when binding')
+    rem_arm_mods_set: bpy.props.BoolProperty(default=False, description='Toggle to be executed the first time binding, to set default prefs')
     
     def draw(self, context):
         col = self.layout.column(align=True)
         col.label(text='Default:')
+        col.prop(self, 'remove_existing_arm_mods', text='Remove Existing Armature Modifiers when Binding')
         col.prop(self, 'default_ikfk_arm', text='IK-FK Arms')
         col.prop(self, 'default_ikfk_leg', text='IK-FK Legs')
         col.prop(self, 'default_head_lock', text='Head Lock')
@@ -43,8 +45,10 @@ class ARP_MT_arp_addon_preferences(bpy.types.AddonPreferences):
         col.prop(self, 'remap_presets_path')
         
         col.separator()
-        col.label(text='Special:')
+        col.separator()
+        col.label(text='Special-Debug:', icon='ERROR')
         col.prop(context.scene, 'arp_debug_mode')
+        col.prop(context.scene, 'arp_debug_bind')
         col.prop(context.scene, 'arp_experimental_mode')
         
         
@@ -57,12 +61,14 @@ def register():
         register_class(ARP_MT_arp_addon_preferences)
     except:
         pass
-    bpy.types.Scene.arp_debug_mode = bpy.props.BoolProperty(name='Debug Mode', default = False, description = 'Run the addon in debug mode (should be enabled only for debugging purposes, not recommended for a normal usage)')
-    bpy.types.Scene.arp_experimental_mode = bpy.props.BoolProperty(name='Experimental Mode', default = False, description = 'Enable experimental, unstable tools. Warning, can lead to errors. Use it at your own risks.')
+    bpy.types.Scene.arp_debug_mode = bpy.props.BoolProperty(name='Debug Mode', default=False, description = 'Run the addon in debug mode for debugging purposes, do not enable for a normal usage!')
+    bpy.types.Scene.arp_debug_bind = bpy.props.BoolProperty(name='Debug Bind', default=False, description='Enable Debug mode for bind functions, for debugging purposes. Warning will break tools, not recommended!')
+    bpy.types.Scene.arp_experimental_mode = bpy.props.BoolProperty(name='Experimental Mode', default=False, description = 'Enable experimental, unstable tools. Warning, can lead to errors. Use it at your own risks.')
     
 def unregister():
     from bpy.utils import unregister_class
     unregister_class(ARP_MT_arp_addon_preferences)
 
     del bpy.types.Scene.arp_debug_mode
+    del bpy.types.Scene.arp_debug_bind
     del bpy.types.Scene.arp_experimental_mode

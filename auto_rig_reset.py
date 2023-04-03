@@ -14,7 +14,7 @@ def reset_all():
             if rig.data.bones.get(cns.subtarget):
                 cns.inverse_matrix = rig.pose.bones[cns.subtarget].matrix.inverted()  
         else:
-            print("Child Of constraint could not be reset, bone does not exist:", cns.subtarget, cns.name)      
+            print("Child Of constraint could not be reset, bone does not exist:", '"'+cns.subtarget+'" from', cns.name)      
         
     # Reset transforms------------------------------
     bpy.ops.pose.select_all(action='SELECT')

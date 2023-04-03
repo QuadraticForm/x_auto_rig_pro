@@ -380,13 +380,20 @@ def get_blender_bindpose_key(obj, mesh):
 
 def get_blender_armature_skin_key(armature, mesh):
     """Return armature's skin key."""
-    return "|".join((get_blenderID_key(armature), get_blenderID_key(mesh), "DeformerSkin"))
+    if mesh != None:
+        return "|".join((get_blenderID_key(armature), get_blenderID_key(mesh), "DeformerSkin"))
+    else:
+        return "|".join((get_blenderID_key(armature), "DeformerSkin"))
 
 
 def get_blender_bone_cluster_key(armature, mesh, bone):
     """Return bone's cluster key."""
-    return "|".join((get_blenderID_key(armature), get_blenderID_key(mesh),
-                     get_blenderID_key(bone), "SubDeformerCluster"))
+    if mesh:
+        return "|".join((get_blenderID_key(armature), get_blenderID_key(mesh),
+                    get_blenderID_key(bone), "SubDeformerCluster"))
+    else:
+        return "|".join((get_blenderID_key(armature),
+                    get_blenderID_key(bone), "SubDeformerCluster"))
 
 
 def get_blender_anim_id_base(scene, ref_id):
