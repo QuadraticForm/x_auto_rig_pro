@@ -2530,6 +2530,19 @@ def _switch_snap_pin(side, type):
             c_arm_stretch["elbow_pin"] = 0.0
             c_arm_stretch.matrix =  c_arm_pin.matrix
 
+        # xx @ NID, new ik elbow pin snapping
+        c_arm_pole = get_pose_bone("c_arms_pole"+side)
+        if c_arm_pin == None:
+            print("No 'c_arms_pole' bone found")
+            return
+        
+        if c_arm_pin["x_elbow_pin"] == 0.0:
+            c_arm_pin["x_elbow_pin"] = 1.0
+            c_arm_pin.matrix = c_arm_pole.matrix
+        else:
+            c_arm_pin["x_elbow_pin"] = 0.0
+            c_arm_pole.matrix =  c_arm_pin.matrix
+
 
 def _set_picker_camera(self):
     # go to object mode
@@ -3959,6 +3972,8 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
             col.operator("pose.arp_snap_pin", text="Snap Pinning")
             # Pinning
             col.prop(get_pose_bone("c_stretch_arm"+ bone_side), '["elbow_pin"]', text="Elbow Pinning", slider=True)
+            # xx @ NID, add new arm pin prop
+            col.prop(get_pose_bone("c_stretch_arm_pin"+ bone_side), '["x_elbow_pin"]', text="X Elbow pinning", slider=True)
 
         # Eye Aim
         if is_selected(eye_aim_bones, selected_bone_name):
@@ -4035,9 +4050,14 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
             if (selected_bone_name[-2:] == ".l"):
                 layout.label(text="Left Elbow Pinning")
                 layout.prop(get_pose_bone("c_stretch_arm"+ bone_side), '["elbow_pin"]', text="Elbow pinning", slider=True)
+                # xx @ NID, add new arm pin prop
+                layout.prop(get_pose_bone("c_stretch_arm_pin"+ bone_side), '["x_elbow_pin"]', text="X Elbow pinning", slider=True)
+
             if (selected_bone_name[-2:] == ".r"):
                 layout.label(text="Right Elbow Pinning")
                 layout.prop(get_pose_bone("c_stretch_arm"+bone_side), '["elbow_pin"]', text="Elbow pinning", slider=True)
+                # xx @ NID, add new arm pin prop
+                layout.prop(get_pose_bone("c_stretch_arm_pin"+ bone_side), '["x_elbow_pin"]', text="X Elbow pinning", slider=True)
 
         pin_legs = ["c_stretch_leg_pin", "c_stretch_leg_pin", "c_stretch_leg", "c_stretch_leg"]
 
