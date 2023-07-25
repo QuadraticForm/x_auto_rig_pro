@@ -970,8 +970,9 @@ class ARP_OT_bind_only(Operator):
         check_retargetting_inputs(self)
         check_armature_init_transforms(self)
         check_bones_names_length(self)
-        self.NLA_tweak_state = nla_exit_tweak()# NLA tweak mode is not supported yet, always disable it        
-        self.NLA_muted = nla_mute(get_object(scn.target_rig))
+        # xx @ NID, bypass error
+        # self.NLA_tweak_state = nla_exit_tweak()# NLA tweak mode is not supported yet, always disable it        
+        # self.NLA_muted = nla_mute(get_object(scn.target_rig))
         
         if not self.unbind:# not relevant to freeze transforms when unbinding
             if self.invalid_arp_bones or \
@@ -1044,11 +1045,13 @@ class ARP_OT_bind_only(Operator):
 
 
         finally:
-            nla_restore_tweak(self.NLA_tweak_state)
+            # xx @ NID, bypass error
+            # nla_restore_tweak(self.NLA_tweak_state)
             
             # NLA: unmute muted tracks
-            if len(self.NLA_muted):      
-                nla_unmute(get_object(scn.target_rig), self.NLA_muted)
+            if len(self.NLA_muted):   
+                # xx @ NID, bypass error    
+                # nla_unmute(get_object(scn.target_rig), self.NLA_muted)
                 # set Replace mode
                 get_object(scn.target_rig).animation_data.action_blend_type = 'REPLACE'
                 
@@ -1104,8 +1107,10 @@ class ARP_OT_retarget(Operator):
         check_retargetting_inputs(self)
         check_armature_init_transforms(self)
         check_bones_names_length(self)
-        self.NLA_tweak_state = nla_exit_tweak()        
-        self.NLA_muted = nla_mute(get_object(scn.target_rig))
+
+        # xx @ NID, bypass error
+        # self.NLA_tweak_state = nla_exit_tweak()        
+        # self.NLA_muted = nla_mute(get_object(scn.target_rig))
         
         if scn.batch_retarget:
             found_at_least_one = False
