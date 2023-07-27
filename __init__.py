@@ -22,7 +22,7 @@ import os, shutil
 bl_info = {
     "name": "Auto-Rig Pro",
     "author": "Artell",
-    "version": (3, 67, 40),
+    "version": (3, 68, 47),
     "blender": (2, 80, 0),
     "location": "3D View > Properties> Auto-Rig Pro",
     "description": "Automatic rig generation based on reference bones and various tools",
@@ -34,15 +34,14 @@ bl_info = {
 
 import bpy
 from bpy.app.handlers import persistent
-#import script files
-from . import auto_rig_prefs
-from . import rig_functions
-from . import auto_rig
-from . import auto_rig_smart
-from . import auto_rig_remap
-from . import auto_rig_ge
-from .export_fbx import arp_fbx_init
-from . import utils
+from .src import auto_rig_prefs
+from .src import rig_functions
+from .src import auto_rig
+from .src import auto_rig_smart
+from .src import auto_rig_remap
+from .src import auto_rig_ge
+from .src.export_fbx import arp_fbx_init
+from .src import utils
  
 
 # gltf export specials 
@@ -107,16 +106,11 @@ def menu_func_export(self, context):
     
 
 def cleanse_modules():
-    """search for your plugin modules in blender python sys.modules and remove them"""
-    #print("Cleanse modules")
     import sys
-
     all_modules = sys.modules 
-    all_modules = dict(sorted(all_modules.items(),key= lambda x:x[0])) #sort them
-   
+    all_modules = dict(sorted(all_modules.items(),key= lambda x:x[0]))
     for k in all_modules:
         if k.startswith(__name__):
-            #print('  clean', k)
             del sys.modules[k]
 
 

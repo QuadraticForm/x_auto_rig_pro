@@ -1,0 +1,62 @@
+[3.68.47]
+
+New/improved:
+Code structure: refactored code to clearly state licensing, "src" folder containing GPL python files, Royalty Free and CC0 for other asset blend files
+Rig: New leg FK lock setting, similar to arms FK lock
+Rig: When binding, removal of existing vertex groups can now be disabled as a default preference. A warning message is displayed at the first bind
+Rig: New "Remove Selected Driver" function to remove the corrective driver of the selected shape key, deletes the helper bone as well
+Rig: When initializing the armature scale during Match to Rig, the animations can now be scale compensated automatically. A dialog box prompts the user to enable scale compensation or not
+Rig: Cosmetic, brought back some colorful icons from Blender 2.79!
+Rig: The ChildOf constraints keyframes now works with multiple selected bones
+Rig: Master constraints for Tail limbs now works with "Before Original" mix mode to avoid rotation/gimbal issues
+Picker: Show a warning if the picker addon is not installed (Misc tab)
+Remap: New "Clean FK Rotation" when retargetting, to ensure single axis rotations on forearm and leg FK controllers
+Remap: New MB Lab preset
+Remap: New "Clean IK Poles" setting when retargetting. It used to be always enabled internally but could lead to issues. Now disabled by default.
+Skin: When binding, used vertex groups are now also searched in geometry nodes attributes, to exclude them from removal
+Skin: If binding fails because of scale issue, a popup message now proposes to rebind with Scale Fix enabled automatically
+Skin: Added tongue and teeth as automatic facial skinned feature (was eyeballs only so far)
+Skin: The toes deforming bone now exactly matches the length of the reference toes bone, for more accurate automatic skinning
+Smart: Tongue and teeth objects can now be Smart detected for more accurate bone placement
+Smart: Cosmetic, new markers icons, also fixing OpenGL error message on MacOS
+Smart: The armature is now tagged in order to evaluate if "Match to Rig" has been performed before binding or exporting, to prevent user errors
+Export: Added triangulation for Fbx export
+Export: Colorful icons from Blender 2.79 for export buttons
+Export: Lengthy object names were not supported at export time, now throws an error message if names are exceeding 56 characters
+Export: New "Sampling Rate" setting to bake animation subframes when the value is below 1.0
+Export: Since Tangent Space normal export does not comply with N-gons, send an error message if N-gons are found and prevent Fbx export
+Export: Since Soft IK is not Fbx export friendly because of the constant slight leg/arm stretch, added to "Check Rig" warnings
+Interface: the "Mirror Shape Keys" button was moved to the Shape Keys dropdown menu, and renamed "Mirror All Shape Keys"
+Check for update: Now shows a differential log, comparing the log of the new available version versus the current old version
+
+
+Fixed:
+Rig: Spine reference bones had incorrectly more than one bbone segment, leading to error when keyframing the whole character
+Rig: Add Blink Pose was not resetting bones transform properly after adding the constraint
+Rig Layers: Made "Edit Layer..." a movable panel instead of an embedded menu panel to avoid the glitch making it disappear when moving the mouse cursor
+Rig: IK-FK snap invalid vector angle error
+Rig: The Lite version menu was kept hidden
+Rig: Removed the extra blank NLA track that was left in the armature presets data. Was interfering with NLA tracks in linked files
+Picker: Missing eyelids
+Remap: Fixed incorrect location values when retargetting multiple actions by resetting the target rig pose to zero
+Remap: Unbind leading to error because of missing clean_ik_pole attribute
+Skin: Error while using edge selection mode with "Set Eyelids Borders"
+Skin: Make sure the current armature modifier has a target armature
+Skin: Unbind button was not removing armature modifiers if the related setting was disabled in the pref (when binding)
+Skin: Error when binding new facial features
+Skin: Blender 3.6 crash when transferring vertex groups via modifiers. Use lower level functions instead.
+Smart: Error crash when facial markers were invalid
+Smart: Switched to marker images, to fix error on MacOS with Metal backend due to OpenGL functions not supported
+Smart: Error handling when spine detection failed because of holes in the chest
+Export: Broken export when the scene was duplicated as a Full Copy and linked overrides
+Export: Custom renaming and UE renaming were conflicting
+Export: Error when exporting meshes with topology changing modifiers (Decimate) and shape keys
+Export: Incorrect thigh parent when exporting as Universal with more than 1 twist bone
+Export: Error when the Rig Name was set to none
+Export: Error when exporting animations as multiple Fbx files but no exported actions were found
+Export: NLA Tweak mode not properly supported when exporting only the active action
+Export: Inconsistencies with twist bones export and soft-link
+Export: Ensure to turn off "Push Additive" if Secondary Controllers are not set to "Additive"
+Version: Compatibility issues with Blender 4.0
+Version: Lite version critical error
+Version: Smart maker display compatibility issue with Blender pre 3.4 versions
