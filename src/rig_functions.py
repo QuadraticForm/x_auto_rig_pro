@@ -2440,6 +2440,13 @@ def _switch_snap_pin(side, type):
         if c_arm_pin == None:
             print("No 'c_stretch_arm_pin' bone found")
             return
+        
+        # NID, new ik elbow pin snapping
+        c_arm_pole = get_pose_bone("c_arms_pole"+side)
+        if c_arm_pole == None:
+            print("No 'c_arms_pole' bone found")
+            return
+        # NID END
 
         if c_arm_stretch["elbow_pin"] == 0.0:
             c_arm_pin.matrix = c_arm_stretch.matrix
@@ -2447,6 +2454,9 @@ def _switch_snap_pin(side, type):
         else:
             c_arm_stretch["elbow_pin"] = 0.0
             c_arm_stretch.matrix =  c_arm_pin.matrix
+            # NID, new ik elbow pin snapping
+            c_arm_pole.matrix =  c_arm_pin.matrix
+            # NID END
 
 
 def _set_picker_camera(self):
