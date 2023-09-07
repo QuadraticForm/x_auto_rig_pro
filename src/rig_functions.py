@@ -789,6 +789,8 @@ class ARP_OT_childof_switcher(Operator):
     bake_type: EnumProperty(items=(('STATIC', 'Static', 'Switch and snap only for the current frame'), ('ANIM', 'Anim', 'Switch and snap over a specified frame range')), default='STATIC')
     fstart: IntProperty(default=0)
     fend: IntProperty(default=10)
+    # NID
+    only_at_keyframe: BoolProperty(default=False)
     
     @classmethod
     def poll(cls, context):
@@ -859,7 +861,9 @@ class ARP_OT_childof_switcher(Operator):
         if self.bake_type == 'ANIM':
             row = layout.column().row(align=True)
             row.prop(self, 'fstart', text='Frame Start')
-            row.prop(self, 'fend', text='Frame End')            
+            row.prop(self, 'fend', text='Frame End')
+            row = layout.row()    
+            row.prop(self, 'only_at_keyframe', text='Only at Keyframe')
         
 
     def execute(self, context):
@@ -882,20 +886,73 @@ class ARP_OT_childof_switcher(Operator):
                 for cns in pb.constraints:
                     if cns.type == 'CHILD_OF':
                         cns_dict[cns.name] = cns.influence
-                
-                
-                for i in range(self.fstart, self.fend+1):
-                    print("SNAP FRAME", i)                              
-                    context.scene.frame_set(i)
+
+                # NID, this branch is added by NID
+                if self.only_at_keyframe is True:
+
+                    # prepass, 
+                    # key child of cns influences at every keyframe 
+                    # if no prepass, influences might change unexpectedly after jump to the next keyframe
+                    #
+                    # for example: location keyframe at 0, 10, 20, but child of cns influences are not keyed
+                    # influences A == 1, B == 0
+                    # if we switch child of at 0, then jump to 10, then A == 0, B == 1
+                    # but, at that time, location is not recalculated, causing final transform to difer from original
+                    #
+
+                    context.scene.frame_set(self.fstart-1)
+                    prev_frame = self.fstart-1
+
+                    for i in range(self.fstart, self.fend+1):
+
+                        bpy.ops.screen.keyframe_jump(next=True)
+
+                        if context.scene.frame_current > self.fend or context.scene.frame_current < self.fstart or prev_frame == context.scene.frame_current:
+                            break
+
+                        prev_frame = context.scene.frame_current
+
+                        bpy.ops.arp.childof_keyer()
+
+                    # normal pass
+
+                    context.scene.frame_set(self.fstart-1)
+                    prev_frame = self.fstart-1
                     
-                    # and constraints
-                    for cns_name in cns_dict:
-                        pb.constraints.get(cns_name).influence = cns_dict[cns_name]
-                    
-                    # reset the initial transforms          
-                    pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = base_transform
-                    
-                    _childof_switcher(self)
+                    for i in range(self.fstart, self.fend+1):
+
+                        bpy.ops.screen.keyframe_jump(next=True)
+
+                        if context.scene.frame_current > self.fend or context.scene.frame_current < self.fstart or prev_frame == context.scene.frame_current:
+                            break
+
+                        prev_frame = context.scene.frame_current
+
+                        # and constraints
+                        for cns_name in cns_dict:
+                            pb.constraints.get(cns_name).influence = cns_dict[cns_name]
+                        
+                        # reset the initial transforms          
+                        pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = base_transform
+                        
+                        _childof_switcher(self)
+
+
+                # NID, this branch is original
+                else:
+
+                    for i in range(self.fstart, self.fend+1):
+                        print("SNAP FRAME", i)                              
+                        context.scene.frame_set(i)
+                        
+                        # and constraints
+                        for cns_name in cns_dict:
+                            pb.constraints.get(cns_name).influence = cns_dict[cns_name]
+                        
+                        # reset the initial transforms          
+                        pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = base_transform
+                        
+                        _childof_switcher(self)
                    
                 # restore autokey state
                 context.scene.tool_settings.use_keyframe_insert_auto = autokey_state
