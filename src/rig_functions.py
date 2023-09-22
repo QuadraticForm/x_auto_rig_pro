@@ -2016,7 +2016,7 @@ def _childof_switcher(self):
             if debug:
                 print("enable constraint:", cns.name)
             parent_type = 'bone' if cns.subtarget else 'object'
-            parent_name = cns.subtarget if parent_type == 'bone' else cns.target.name            
+            parent_name = cns.subtarget if parent_type == 'bone' else cns.target.name       
             
             if debug:
                 print("MAT INIT")
@@ -2030,8 +2030,27 @@ def _childof_switcher(self):
             
             # snap
             if parent_type == 'bone':
-                bone_parent = get_pose_bone(parent_name)
-                pb.matrix = cns.inverse_matrix.inverted() @ bone_parent.matrix.inverted() @ mat_prev
+
+                # NID
+                # ARP Original
+                # bone_parent = get_pose_bone(parent_name)
+                # pb.matrix = cns.inverse_matrix.inverted() @ bone_parent.matrix.inverted() @ mat_prev
+                # END NID
+
+                # NID
+                # modified
+                parent_obj_name = cns.target.name
+                parent_bone_name = cns.subtarget
+
+                parent_obj = get_object(parent_obj_name)
+
+                parent_bone = parent_obj.pose.bones.get(parent_bone_name)
+
+                pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ parent_obj.matrix_world.inverted() @ mat_prev
+                # pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ mat_prev
+                # END NID
+
+                
                 
                 update_transform()
                 
