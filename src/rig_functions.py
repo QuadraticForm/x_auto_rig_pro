@@ -2050,8 +2050,6 @@ def _childof_switcher(self):
                 # pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ mat_prev
                 # END NID
 
-                
-                
                 update_transform()
                 
                 if debug:
@@ -2974,6 +2972,9 @@ def fk_to_ik_arm(obj, side):
     hand_ik = obj.pose.bones[ik_arm[2] + side]
     pole = obj.pose.bones[ik_arm[3] + side]
 
+    # NID, should snap shoulder too since we added natural shoulder function
+    shoulder = obj.pose.bones["c_shoulder" + side]
+
     # Stretch
     if hand_ik['auto_stretch'] == 0.0:
         hand_fk['stretch_length'] = hand_ik['stretch_length']
@@ -2985,6 +2986,9 @@ def fk_to_ik_arm(obj, side):
     snap_rot(arm_fk, arm_ik)
     snap_rot(forearm_fk, forearm_ik)
     snap_rot(hand_fk, hand_ik)
+
+    # NID, should snap shoulder too since we added natural shoulder function
+    snap_rot(shoulder, shoulder)
 
     #Snap scale
     hand_fk.scale =hand_ik.scale
