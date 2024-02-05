@@ -1,62 +1,53 @@
-[3.68.47]
+[3.69.33]
 
 New/improved:
-Code structure: refactored code to clearly state licensing, "src" folder containing GPL python files, Royalty Free and CC0 for other asset blend files
-Rig: New leg FK lock setting, similar to arms FK lock
-Rig: When binding, removal of existing vertex groups can now be disabled as a default preference. A warning message is displayed at the first bind
-Rig: New "Remove Selected Driver" function to remove the corrective driver of the selected shape key, deletes the helper bone as well
-Rig: When initializing the armature scale during Match to Rig, the animations can now be scale compensated automatically. A dialog box prompts the user to enable scale compensation or not
-Rig: Cosmetic, brought back some colorful icons from Blender 2.79!
-Rig: The ChildOf constraints keyframes now works with multiple selected bones
-Rig: Master constraints for Tail limbs now works with "Before Original" mix mode to avoid rotation/gimbal issues
-Picker: Show a warning if the picker addon is not installed (Misc tab)
-Remap: New "Clean FK Rotation" when retargetting, to ensure single axis rotations on forearm and leg FK controllers
-Remap: New MB Lab preset
-Remap: New "Clean IK Poles" setting when retargetting. It used to be always enabled internally but could lead to issues. Now disabled by default.
-Skin: When binding, used vertex groups are now also searched in geometry nodes attributes, to exclude them from removal
-Skin: If binding fails because of scale issue, a popup message now proposes to rebind with Scale Fix enabled automatically
-Skin: Added tongue and teeth as automatic facial skinned feature (was eyeballs only so far)
-Skin: The toes deforming bone now exactly matches the length of the reference toes bone, for more accurate automatic skinning
-Smart: Tongue and teeth objects can now be Smart detected for more accurate bone placement
-Smart: Cosmetic, new markers icons, also fixing OpenGL error message on MacOS
-Smart: The armature is now tagged in order to evaluate if "Match to Rig" has been performed before binding or exporting, to prevent user errors
-Export: Added triangulation for Fbx export
-Export: Colorful icons from Blender 2.79 for export buttons
-Export: Lengthy object names were not supported at export time, now throws an error message if names are exceeding 56 characters
-Export: New "Sampling Rate" setting to bake animation subframes when the value is below 1.0
-Export: Since Tangent Space normal export does not comply with N-gons, send an error message if N-gons are found and prevent Fbx export
-Export: Since Soft IK is not Fbx export friendly because of the constant slight leg/arm stretch, added to "Check Rig" warnings
-Interface: the "Mirror Shape Keys" button was moved to the Shape Keys dropdown menu, and renamed "Mirror All Shape Keys"
-Check for update: Now shows a differential log, comparing the log of the new available version versus the current old version
-
+Version: Upgraded the whole code base to Blender 4.0, with armature collections support. Make sure to click "Update Armature" when opening rigs from older versions.
+Version: Because Blender 4 removed the extra frame added at the end of actions frame range, added a new Legacy setting to back up this additional frame
+Version: Blender 4 does not handle properly the double IK fingers constraints, leads to cyclic dependency (wobbly bones effect). Then, unfortunately the second IK at the tip of the fingers had to be removed. Click "Update Armature" when opening old rigs with IK fingers. Note, this second IK constraint could be restored later, will require more advanced bones mechanics to avoid the cyclic dependency.
+Export: New Presets feature, to save and load export settings quickly
+Export: FBX: Expose the "Force Start/End Keyframe"
+Export: Clean up of the humanoid UE skeleton collections
+Export: The Fbx and Gltf export operators were renamed, leading to change the script snippets in the documentation. Old name: "id.arp_export_fbx_panel", New: "arp.arp_export_fbx_panel"
+Export: FBX: Exposed the Vertex Color space setting
+Export: Mesh to mesh parenting is now preserved when exporting, and non-skinned children meshes parented to skinned meshes are exported as well
+Export: Bones animations can now be exported with constant keyframe interpolation, using the "Set Const. Bones" button. Applies to all keyframes, all actions of given bones. Todo later: fine-tuning, in order to export only specific keyframes as constant.
+Export: Added effective export time in the popup notification after export
+Export: Humanoid export now supports more than 2 arms and feathers
+Rig: The selected armature can now be saved as a custom preset automatically (it was already possible to add custom presets before, but the preset files had to created and put in the folder manually)
+Rig: The custom presets armatures can be removed using a dedicated menu
+Rig: Facial options: Slight change in the behavior of "Update Transforms" for eyelids. Now, eyelid bones are aligned automatically in a circular shape only if the amount was changed and this setting is turned on. Before, they were always aligned if the amount was changed, regardless of this setting.
+Rig: Spline IK: New FK mode (Limb Options). Generate master FK controllers every Nth bones, by default locked to the IK masters amount for correct IK-FK snap. 
+Rig: Spline IK: IK-FK switch and snap (Rig Main Properties). IK to FK snapping is accurate, but FK to IK is not by nature: compensating the smooth curve interpolation between control points is quite a technical challenge, to improve later if possible.
+Rig: Spline IK: New "Update Vertex Groups Name" setting (Limb Options). If enabled, automatically renames the vertex groups of the deformed meshes, according to the latest changes in Spline IK Limb Options.
+Rig: Armature Presets: Custom armature presets can now be stored in an external folder, as set in the addon preferences. Armature libraries can be added into this external folder, making it independent from the addon installation folder (custom armatures will not be deleted anymore when updating the addon). Custom presets files stored in the addon folder still remain.
+Rig: Blink Pose: When removing the blink pose, a menu now prompts to remove the whole blink pose, or only in-between poses
 
 Fixed:
-Rig: Spine reference bones had incorrectly more than one bbone segment, leading to error when keyframing the whole character
-Rig: Add Blink Pose was not resetting bones transform properly after adding the constraint
-Rig Layers: Made "Edit Layer..." a movable panel instead of an embedded menu panel to avoid the glitch making it disappear when moving the mouse cursor
-Rig: IK-FK snap invalid vector angle error
-Rig: The Lite version menu was kept hidden
-Rig: Removed the extra blank NLA track that was left in the armature presets data. Was interfering with NLA tracks in linked files
-Picker: Missing eyelids
-Remap: Fixed incorrect location values when retargetting multiple actions by resetting the target rig pose to zero
-Remap: Unbind leading to error because of missing clean_ik_pole attribute
-Skin: Error while using edge selection mode with "Set Eyelids Borders"
-Skin: Make sure the current armature modifier has a target armature
-Skin: Unbind button was not removing armature modifiers if the related setting was disabled in the pref (when binding)
-Skin: Error when binding new facial features
-Skin: Blender 3.6 crash when transferring vertex groups via modifiers. Use lower level functions instead.
-Smart: Error crash when facial markers were invalid
-Smart: Switched to marker images, to fix error on MacOS with Metal backend due to OpenGL functions not supported
-Smart: Error handling when spine detection failed because of holes in the chest
-Export: Broken export when the scene was duplicated as a Full Copy and linked overrides
-Export: Custom renaming and UE renaming were conflicting
-Export: Error when exporting meshes with topology changing modifiers (Decimate) and shape keys
-Export: Incorrect thigh parent when exporting as Universal with more than 1 twist bone
-Export: Error when the Rig Name was set to none
-Export: Error when exporting animations as multiple Fbx files but no exported actions were found
-Export: NLA Tweak mode not properly supported when exporting only the active action
-Export: Inconsistencies with twist bones export and soft-link
-Export: Ensure to turn off "Push Additive" if Secondary Controllers are not set to "Additive"
-Version: Compatibility issues with Blender 4.0
-Version: Lite version critical error
-Version: Smart maker display compatibility issue with Blender pre 3.4 versions
+Export: Error when actions contained a single frame only
+Export: Scene Units set to None was crashing the export
+Export: Actions with no "id_root" attributes were not exported
+Export: Wrong mannequin bones axes orientation, because of hidden bones collections
+Export: Shape keys animation as an NLA track did not export with "Apply Modifiers" setting enabled
+Export: Error when exporting IK Splines with Blender 4
+Export: Crash when no deforming bones are selected, while "Only Selected Bones" is enabled
+Export: The "Set Universal Rig" function was missing custom script execution
+Export: The Set/Unset export rig function could remove vertex groups when unsetting, if the vertex groups were not assigned to any vertices
+Remap: Fixed unreported bug with collection visibility 
+Version: "Show IK Direction" line broken in Blender 4
+Version: "Update Armature" was not removing the second IK fingers constraint when the rig was already updated to Blender 4
+Version: Move constraints operator broken in Blender 4, use lower level functions instead
+Version: Some users report error when importing the Requests module (chardet import error), use urllib instead
+Rig: Ensure bones custom shapes are assigned to the cs collection and parented to cs_grp
+Rig Layers: Error (in console) when updating layers visibility while nothing is selected
+Rig: Disable fingers Rot From Scale broken in Blender 4
+Rig: Control and reference lips bones had incorrect colors in Edit mode
+Rig: Error with Kilt limbs and single colliding leg 
+Rig: The Kilt custom shapes were removed when editing more than one Kilt limb
+Rig: New eyelid bones had no color
+Rig: Legs IK poles roll was not aligned when Match to Rig. Added a Legacy setting for backward-compatibility
+Smart: Error when removing an optional facial object from the detection
+Smart: Error if facial objects are not assigned to any view layers
+Smart: Removed any dead BGL call for MacOS compatibility
+Skin: Bind crashing when an eye object was defined in Facial Features, but no eye bones found
+CheckForUpdate: urllib request module import broken in latest python versions
+Installation: Armature presets path crashing the addon install if the path does not exist yet

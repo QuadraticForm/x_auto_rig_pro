@@ -2,6 +2,15 @@ import bpy
 import mathutils
 from mathutils import *
 
+# Layers to collection data conversion
+layer_col_map_special = {'ge_childof':16, 'ge_orient':17, 'ge_basebone':18, 'remap01':24, 'mch_feathers':24, 'mch_kilt_masters':24, 'remap02':25}
+layer_col_map = {'Main':0, 'Secondary':1, 'mch_01':8, 'mch_stretch':9, 'mch_base':10, 'mch_twist':11, 'mch_ik':12, 
+                'mch_ik_nostr':13, 'mch_fk':14, 'Reference':17, 'mch_disabled':22, 'mch_cs_transf':23, 'Deform':31}
+                
+bones_groups = ['secondary', 'hair', 'body.r', 'body.l', 'hidden', 'hand.l', 'hand.r', 'body.r_sel', 'body.l_sel', 'body.x_sel', 'body.x']
+bones_groups_to_remove = ['secondary', 'hair', 'hidden', 'hand.l', 'hand.r', 'body.l_sel', 'body.x_sel', 'body.r_sel', 'ik_target.l', 'ik_target.r', 'ik_target2.l', 'ik_target2.r', 'ik_pole.l', 'ik_pole.r', 'red']
+
+
 # ARMS
 #   Fingers
 #     thumb
@@ -210,13 +219,15 @@ mouth_bones_ref_dict = {'lips_top_mid': 'lips_top_ref.x',
                         'lips_bot':'lips_bot_ref',
                         'lips_bot_01': 'lips_bot_01_ref',
                         'lips_roll_top': 'lips_roll_top_ref.x',
-                        'lips_roll_bot': 'lips_roll_bot_ref.x',                        
+                        'lips_roll_bot': 'lips_roll_bot_ref.x',   
+                        'lips_offset': 'lips_offset_ref.x',
                         'jaw':'jaw_ref.x' 
                         }
                         
 mouth_bones_dict = {
                     'c_jawbone': {'name':'c_jawbone.x', 'deform':False, 'control':True},
-                    'jawbone': {'name':'jawbone.x', 'deform':True, 'control':False},                    
+                    'jawbone': {'name':'jawbone.x', 'deform':True, 'control':False},
+                    'jawbone_track':{'name':'jawbone_track.x', 'deform':False, 'control':False},
                     'c_lips_bot_01_offset': {'name':'c_lips_bot_01_offset', 'deform':False, 'control':False},
                     'c_lips_bot_01': {'name':'c_lips_bot_01', 'deform':True, 'control':True},
                     'c_lips_bot_offset_mid': {'name':'c_lips_bot_offset.x', 'deform':False, 'control':False},
@@ -241,11 +252,12 @@ mouth_bones_dict = {
                     'c_lips_top_01': {'name':'c_lips_top_01', 'deform':True, 'control':True},
                     'c_lips_smile_offset': {'name':'c_lips_smile_offset', 'deform':False, 'control':False},
                     'c_lips_smile': {'name':'c_lips_smile', 'deform':True, 'control':True},
-                    'c_lips_corner_mini': {'name':'c_lips_corner_mini', 'deform':False, 'control':True},
+                    'c_lips_corner_mini': {'name':'c_lips_corner_mini', 'deform':True, 'control':True},
+                    'c_lips_offset': {'name':'c_lips_offset.x', 'deform':False, 'control':True}
                     }
                     
                     
-mouth_bones_base = [j['name'] for i, j in mouth_bones_dict.items()]   
+mouth_bones_base = [j['name'] for i, j in mouth_bones_dict.items()]
 mouth_ref_base = [j for i, j in mouth_bones_ref_dict.items()]   
 
 mouth_ref = []
@@ -266,11 +278,11 @@ for i in mouth_ref_base:
         mouth_ref.append(i+'.r')
 
         
-def get_variable_lips(head_side, type='REFERENCE', no_side=False, levels=['top_', 'bot_']):
-    types = [type]    
-    if type == 'ALL':
+def get_variable_lips(head_side, btype='REFERENCE', no_side=False, levels=['top_', 'bot_']):
+    types = [btype]    
+    if btype == 'ALL':
         types = ['REFERENCE', 'CONTROLLER', 'CONT_MASTER', 'OFFSET', 'RETAIN', 'FOLLOW']
-    if type == 'NON_REF':
+    if btype == 'NON_REF':
         types = ['CONTROLLER', 'CONT_MASTER', 'OFFSET', 'RETAIN', 'FOLLOW']
         
     lips_list = []
@@ -472,9 +484,9 @@ eyelids_bones_ref_default_dict = {'eyelid_top_02': 'eyelid_top_02_ref',
                             'eyelid_bot_03': 'eyelid_bot_03_ref'}
                     
                     
-def get_variable_eyelids(head_side, eye_sides=['.l', '.r'], type='REFERENCE', levels=['top_', 'bot_'], no_side=False):
-    types = [type]    
-    if type == 'ALL':
+def get_variable_eyelids(head_side, eye_sides=['.l', '.r'], btype='REFERENCE', levels=['top_', 'bot_'], no_side=False):
+    types = [btype]    
+    if btype == 'ALL':
         types = ['REFERENCE', 'CONTROLLER']
    
     eyelids_list = []
@@ -700,7 +712,13 @@ tail_bones = ['c_tail_master']
 
 
 #SMART FACIAL MARKERS
-facial_markers = {'eyebrow_01_end.l': 15, 'eyebrow_01.l':16, 'eyebrow_02.l':17, 'eyebrow_03.l':18, 'eyebrow_01_end.r':40, 'eyebrow_01.r':41, 'eyebrow_02.r':42, 'eyebrow_03.r':43,'eyelid_corner_01.l':7, 'eyelid_bot_01.l':6, 'eyelid_bot_02.l':5, 'eyelid_bot_03.l':12, 'eyelid_corner_02.l':11, 'eyelid_top_03.l':10, 'eyelid_top_02.l':9, 'eyelid_top_01.l':8, 'eyelid_corner_01.r':30, 'eyelid_bot_01.r':29, 'eyelid_bot_02.r':28, 'eyelid_bot_03.r':35, 'eyelid_corner_02.r':34, 'eyelid_top_03.r':33, 'eyelid_top_02.r':32, 'eyelid_top_01.r':31,'nose_03.x':36, 'nose_01.x':37, 'cheek_smile.l':13, 'cheek_inflate.l':14, 'cheek_smile.r':38, 'cheek_inflate.r':39, 'lips_top.x':22, 'lips_top.l':0, 'lips_top_01.l':1, 'lips_smile.l':2, 'lips_bot_01.l':3, 'lips_bot.l':4, 'lips_bot.x':21, 'lips_top.r':23, 'lips_top_01.r':24, 'lips_smile.r':25, 'lips_bot_01.r':26, 'lips_bot.r':27,'chin_01.x': 47, 'chin_02.x':46, 'ear_01.l':20, 'ear_02.l':19, 'ear_01.r':45, 'ear_02.r':44}
+facial_markers = {'eyebrow_01_end.l': 15, 'eyebrow_01.l':16, 'eyebrow_02.l':17, 'eyebrow_03.l':18, 'eyebrow_01_end.r':40, 'eyebrow_01.r':41, 'eyebrow_02.r':42, 'eyebrow_03.r':43,
+'eyelid_corner_01.l':7, 'eyelid_bot_01.l':6, 'eyelid_bot_02.l':5, 'eyelid_bot_03.l':12, 'eyelid_corner_02.l':11, 'eyelid_top_03.l':10, 'eyelid_top_02.l':9, 'eyelid_top_01.l':8, 'eyelid_corner_01.r':30, 'eyelid_bot_01.r':29, 'eyelid_bot_02.r':28, 'eyelid_bot_03.r':35, 'eyelid_corner_02.r':34, 'eyelid_top_03.r':33, 'eyelid_top_02.r':32, 'eyelid_top_01.r':31,
+'nose_03.x':36, 'nose_01.x':37, 
+'cheek_smile.l':13, 'cheek_inflate.l':14, 'cheek_smile.r':38, 'cheek_inflate.r':39, 
+'lips_top.x':22, 'lips_top.l':0, 'lips_top_01.l':1, 'lips_smile.l':2, 'lips_bot_01.l':3, 'lips_bot.l':4, 'lips_bot.x':21, 'lips_top.r':23, 'lips_top_01.r':24, 'lips_smile.r':25, 'lips_bot_01.r':26, 'lips_bot.r':27,
+'chin_01.x': 47, 'chin_02.x':46, 
+'ear_01.l':20, 'ear_02.l':19, 'ear_01.r':45, 'ear_02.r':44}
 
 
 

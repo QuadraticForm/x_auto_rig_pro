@@ -1,10 +1,10 @@
-import bpy, os, ast
+import bpy, os, ast, random
 from bpy.types import (Operator, Menu, Panel, UIList, PropertyGroup, FloatProperty, StringProperty, BoolProperty)
 from bpy.props import *
 from mathutils import *
 from math import *
 from bpy.app.handlers import persistent
-from . import auto_rig_datas
+from . import auto_rig_datas as ard
 from . import reset_all_controllers
 from operator import itemgetter
 
@@ -45,20 +45,36 @@ def get_override_dict_compat():
         return {'LIBRARY_OVERRIDABLE'}
 
 
-# if layers viz are animated, update on each frame
 @persistent   
-def rig_layers_anim_update(foo):   
+def rig_layers_anim_update(foo):  
+    # if layers viz are animated, update on each frame
     if bpy.context.scene.arp_layers_animated:
         for obj in bpy.data.objects:
             if obj.type == 'ARMATURE':
                 if 'layers_sets' in obj.keys():
                     for lay in obj.layers_sets:
-                        lay.visibility_toggle = lay.visibility_toggle# hacky but works
+                        lay.visibility_toggle = lay.visibility_toggle# hacky but works                
 
         
 def update_visibility_toggle(self, context):
     set_layer_vis(self, self.visibility_toggle)
-    
+
+
+def is_bone_in_layer(bone_name, layer_type):
+    if bpy.app.version >= (4,0,0):
+        if bpy.context.mode == 'EDIT_ARMATURE':# Armature Edit mode must be handled this way, prone to error otherwise (bone data not up to date)
+            in_collection = [ebone.name for ebone in bpy.context.active_object.data.edit_bones if layer_type in ebone.collections]
+            return bone_name in in_collection
+        else:
+            return layer_type in bpy.context.active_object.data.bones.get(bone_name).collections
+    else:
+        if layer_type in ard.layer_col_map_special:# layer idx special cases
+            layer_idx = ard.layer_col_map_special[layer_type]
+        else:# standard ARP layer-collec conversion       
+            layer_idx = ard.layer_col_map[layer_type]
+            
+        return bpy.context.active_object.data.bones.get(bone_name).layers[layer_idx]
+        
     
 def update_layer_select(self, context):
     if self.update_saved_layers == False:
@@ -77,14 +93,28 @@ def update_layer_select(self, context):
             if b:
                 b.select = True
                 
-    # bones layer  
-    for i, lay in enumerate(self.layers):
-        if lay:        
-            #rig.data.layers[i] = True# show the layer before selecting
-            
-            for b in rig.data.bones:                
-                if b.layers[i]:
-                    select_bone(b.name)     
+    # bones collection/layer
+    if bpy.app.version >= (4,0,0):
+        # get bones collections in set
+        bones_collections = []
+        for item in self.bonecollections_set:
+            for collec in rig.data.collections:
+                if 'collec_id' in collec.keys():
+                    if item.collec_id == collec['collec_id']:
+                        bones_collections.append(collec)
+                        
+        # get bones in collections
+        for col in bones_collections:
+            for b in rig.data.bones:
+                if is_bone_in_layer(b.name, col.name):
+                    select_bone(b.name)
+        
+    else:
+        for i, lay in enumerate(self.layers):
+            if lay:
+                for b in rig.data.bones:                
+                    if b.layers[i]:
+                        select_bone(b.name)     
              
 
     # bones list
@@ -94,34 +124,53 @@ def update_layer_select(self, context):
         select_bone(bname)     
 
     
-    
 def update_layer_set_exclusive(self, context):
     if self.update_saved_layers == False:
         return
         
     rig = bpy.context.active_object
     
-    # armature layers
+    # armature collections/layers
     set_layer_vis(self, True)
     
-    current_layers_idx = [i for i, l in enumerate(self.layers) if l]    
+    current_layers_idx = []
+    
+    if bpy.app.version >= (4,0,0):
+        for item in self.bonecollections_set:
+            for collec in rig.data.collections:
+                if 'collec_id' in collec.keys():
+                    if item.collec_id == collec['collec_id']:
+                        if collec.is_visible:
+                            current_layers_idx.append(collec.name)       
+    else:
+        current_layers_idx = [i for i, l in enumerate(self.layers) if l]    
     
     if self.exclusive_toggle:
         
         # save current displayed layers
         saved_layers = []
         
-        for i, lay in enumerate(rig.data.layers):
-            if lay:
-                saved_layers.append(i)
-                
+        if bpy.app.version >= (4,0,0):
+            for collec in rig.data.collections:
+                if collec.is_visible:
+                    saved_layers.append(collec.name)
+        else:
+            for i, lay in enumerate(rig.data.layers):
+                if lay:
+                    saved_layers.append(i)
+                    
         self.exclusive_saved_layers = str(saved_layers)
         
         # hide other layers
         if len(current_layers_idx):
-            for i, lay in enumerate(rig.data.layers):
-                if not i in current_layers_idx:
-                    rig.data.layers[i] = False
+            if bpy.app.version >= (4,0,0):
+                for col in rig.data.collections:
+                    if not col.name in current_layers_idx:
+                        col.is_visible = False
+            else:
+                for i, lay in enumerate(rig.data.layers):
+                    if not i in current_layers_idx:
+                        rig.data.layers[i] = False
                     
     else:
         # restore saved layers  
@@ -129,7 +178,10 @@ def update_layer_set_exclusive(self, context):
         saved_layers = ast.literal_eval(self.exclusive_saved_layers)
         
         for i in saved_layers:
-            rig.data.layers[i] = True
+            if bpy.app.version >= (4,0,0):
+                rig.data.collections.get(i).is_visible = True
+            else:
+                rig.data.layers[i] = True
     
     # bones       
     bones_list = ast.literal_eval(self.bones)        
@@ -237,6 +289,7 @@ class ARP_OT_property_pin(Operator):
         return {'FINISHED'}        
 
 
+#   Rig Layers classes -----------------------------------------------------------
 class ARP_OT_layers_add_defaults(Operator):
     """Add default Main and Secondary layer sets"""
     bl_idname = "arp.layers_add_defaults"
@@ -249,11 +302,19 @@ class ARP_OT_layers_add_defaults(Operator):
     
             set1 = rig.layers_sets.add()
             set1.name = 'Main' 
-            set1.layers[0] = True          
-            
             set2 = rig.layers_sets.add()
             set2.name = 'Secondary'
-            set2.layers[1] = True
+            
+            if bpy.app.version >= (4,0,0):
+                collec_main = rig.data.collections.get('Main')
+                if collec_main:
+                    layers_set_add_collec(lay_set=set1, collec_name='Main')
+                collec_secondary = rig.data.collections.get('Secondary')
+                if collec_secondary:
+                    layers_set_add_collec(lay_set=set2, collec_name='Secondary')
+            else:
+                set1.layers[0] = True 
+                set2.layers[1] = True
             
             rig.layers_sets_idx = len(rig.layers_sets)-1
                     
@@ -264,40 +325,23 @@ class ARP_OT_layers_add_defaults(Operator):
         
         
 class ARP_OT_layers_sets_all_toggle(Operator):
-    """Set all layers visibility.\nWhen hiding all, the first layer will remain displayed"""
+    """Set all layers visibility"""
     bl_idname = "arp.layers_sets_all_toggle"
     bl_label = "Show All Layers Set"
     bl_options = {'UNDO'}   
   
     state: BoolProperty(default=True)
     
-    def execute(self, context):        
-        try:   
-            rig = bpy.context.active_object           
-            
-            # hide all (at least the first layer must remain enabled)
-            if self.state == False:
+    def execute(self, context):
+        rig = bpy.context.active_object           
+        
+        # hide all (at least the first layer must remain enabled)
+        if self.state == False:
+            if bpy.app.version < (4,0,0):
                 rig.data.layers[0] = True
-                
-            for set in rig.layers_sets:
-                # show/hide layers
-                for i, lay in enumerate(set.layers):
-                    if self.state == False:
-                        if i == 0:
-                            continue
-                    if lay:
-                        rig.data.layers[i] = self.state 
-
-                # show/hide objects              
-                for obji in set.objects_set:
-                    obj = obji.object_item
-                    if self.state == True:
-                        unhide_object(obj)
-                    else:
-                        hide_object(obj)
-                            
-        except:
-            pass
+            
+        for set in rig.layers_sets:
+            set.visibility_toggle = self.state
             
         return {'FINISHED'}
         
@@ -585,11 +629,99 @@ class ARP_OT_layers_sets_add_object(Operator):
         except:
             pass
             
+        return {'FINISHED'}   
+
+
+class ARP_OT_layers_sets_remove_collection(Operator):
+    """Delete the selected bone collection from the layer set"""
+
+    bl_idname = "arp.delete_bone_collec"
+    bl_label = "The action will be permanently removed from the scene, ok?"
+    bl_options = {'UNDO'}
+
+    collec_id : StringProperty(default='')
+   
+    def execute(self, context):
+        rig = bpy.context.active_object
+        current_set = rig.layers_sets[rig.layers_sets_idx]
+      
+        if self.collec_id != '':           
+            for idx, item in enumerate(current_set.bonecollections_set):              
+                if item.collec_id == self.collec_id:
+                    print('Removing collection ID from set', item.collec_id)
+                    current_set.bonecollections_set.remove(idx)
+                
+        return {'FINISHED'}        
+
+ 
+def generate_collec_id(collec_name):
+    # generate 10 random indexes as unique identifier
+    rand_indexes = ''
+    for i in range(0,10):
+        rand_indexes += str(random.randint(1, 10))
+    return collec_name + rand_indexes
+    
+ 
+def layers_set_add_collec(lay_set=None, collec_name=None):
+    # if lay_set is None, use active layer set in the list
+    # if collec_name is None, use collec name set in the Layer Edit dialog
+    
+    rig = bpy.context.active_object  
+
+    if lay_set == None:
+        current_set = rig.layers_sets[rig.layers_sets_idx]
+    else:
+        current_set = lay_set
+    
+    if collec_name == None:
+        collec_name = current_set.collection_to_add
+    
+    # get the collection id
+    collec_to_add_id = None
+    collec_to_add = rig.data.collections.get(collec_name)
+    if 'collec_id' in collec_to_add.keys():
+        collec_to_add_id = collec_to_add['collec_id']
+        print('collec_to_add_id', collec_to_add_id)
+    
+    # check if it's not already in the set
+    found = False
+    if collec_to_add_id != None:# if no ID yet, hasn't been added
+        print('Check existing collec IDs in this layer set...')
+        for item in current_set.bonecollections_set:
+            #print('  current found:', item.collec_id)
+            if item.collec_id == collec_to_add_id:
+                found = True   
+                print('Collec already in set, do not add again')
+                break                
+
+    # add collection ID
+    if not found:            
+        if collec_name != None:
+            print('Add collec to set...')
+            new_collec_set = current_set.bonecollections_set.add()
+            new_collec_id = generate_collec_id(collec_name)
+            print('  new_collec_id', new_collec_id)
+            new_collec_set.collec_id = new_collec_id    
+            collec_to_add['collec_id'] = new_collec_id
+            
+
+class ARP_OT_layers_sets_add_collection(Operator):
+    """Add bone collection in layer set"""
+    bl_idname = "arp.layers_sets_add_collection"
+    bl_label = "Add Collection In Set"   
+  
+    def execute(self, context):        
+        layers_set_add_collec()
+        
         return {'FINISHED'}
         
 
 class ObjectSet(PropertyGroup):
     object_item : PointerProperty(type=bpy.types.Object)
+    
+    
+class BoneCollectionSet(PropertyGroup):
+    collec_id : StringProperty(default='')#PointerProperty(type=bpy.types.BoneCollection) does not work, sigh... tag collection with a string identifier instead
 
  
 class LayerSet(PropertyGroup):  
@@ -599,10 +731,12 @@ class LayerSet(PropertyGroup):
     visibility_toggle_desc = 'Show or hide this layer'
     
     if bpy.app.version >= (2,90,0):
-        name : StringProperty(default="", description="Limb Name", override={'LIBRARY_OVERRIDABLE'})        
+        name : StringProperty(default='', description='Limb Name', override={'LIBRARY_OVERRIDABLE'})        
         layers: BoolVectorProperty(size=32, default=(False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False), subtype='LAYER', override={'LIBRARY_OVERRIDABLE'})      
         objects_set : CollectionProperty(type=ObjectSet, description=objects_set_desc, override=get_override_dict_compat())
-        collection : PointerProperty(type=bpy.types.Collection, override={'LIBRARY_OVERRIDABLE'})    
+        bonecollections_set: CollectionProperty(type=BoneCollectionSet, description='Collection of bones in this set', override=get_override_dict_compat())
+        collection : PointerProperty(type=bpy.types.Collection, override={'LIBRARY_OVERRIDABLE'}) 
+        collection_to_add: StringProperty(default='', override={'LIBRARY_OVERRIDABLE'})
         object_to_add: PointerProperty(type=bpy.types.Object, override={'LIBRARY_OVERRIDABLE'})        
         visibility_toggle: BoolProperty(default=True, update=update_visibility_toggle, override={'LIBRARY_OVERRIDABLE'}, description=visibility_toggle_desc, options={'ANIMATABLE'})       
         exclusive_toggle: BoolProperty(default=False, update=update_layer_set_exclusive, override={'LIBRARY_OVERRIDABLE'}, description=exclusive_toggle_desc)
@@ -626,12 +760,7 @@ class LayerSet(PropertyGroup):
         update_saved_layers: BoolProperty(default=True)    
 
 
-class ARP_UL_layers_sets_list(UIList):
-    """
-    @classmethod
-    def poll(cls, context):
-        return
-    """
+class ARP_UL_layers_sets_list(UIList):  
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         scn = bpy.context.scene
         row = layout.row(align=True)
@@ -670,8 +799,7 @@ class ARP_OT_layers_sets_move(Operator):
                 target_idx = len(rig.layers_sets)-1
             if target_idx > len(rig.layers_sets)-1:
                 target_idx = 0
-                
-            #item = rig.layers_sets[rig.layers_sets_idx]
+
             rig.layers_sets.move(rig.layers_sets_idx, target_idx)
             rig.layers_sets_idx = target_idx
             
@@ -679,17 +807,6 @@ class ARP_OT_layers_sets_move(Operator):
             pass
         return {'FINISHED'}
   
-
-'''
-class ARP_PT_layers_sets_edit(Panel):
-    bl_label = "Edit Layer Set"
-    bl_region_type = 'HEADER'
-    bl_space_type = 'VIEW_3D'
-    bl_ui_units_x = 14
-    
-    def draw(self, context):    
-        draw_layer_set_edit(self, context) 
-'''
 
 class ARP_PT_layers_sets_edit(Operator):
     """Edit a layer set"""
@@ -718,7 +835,7 @@ class ARP_OT_layers_sets_add(Operator):
         # add new layer set with default settings
         _add_layer_set(self)
         
-        # Open dialog
+        # open dialog
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
    
@@ -745,7 +862,9 @@ class ARP_OT_layers_sets_remove(Operator):
             context.preferences.edit.use_global_undo = use_global_undo
         return {'FINISHED'} 
         
-        
+   
+#   End Rig Layers classes --------------------------------------------------------------------   
+
 class ARP_OT_childof_keyer(Operator):
     """Keyframe the influence of all Child Of constraints of this bone"""
     
@@ -789,8 +908,8 @@ class ARP_OT_childof_switcher(Operator):
     bake_type: EnumProperty(items=(('STATIC', 'Static', 'Switch and snap only for the current frame'), ('ANIM', 'Anim', 'Switch and snap over a specified frame range')), default='STATIC')
     fstart: IntProperty(default=0)
     fend: IntProperty(default=10)
-    # NID
-    only_at_keyframe: BoolProperty(default=False)
+    one_key_per_frame: BoolProperty(default=True, description="Insert one keyframe per frame if enabled, otherwise only existing keyframes within the given frame range will be keyframed (less accurate)", name="Key All Frames")
+    
     
     @classmethod
     def poll(cls, context):
@@ -862,8 +981,9 @@ class ARP_OT_childof_switcher(Operator):
             row = layout.column().row(align=True)
             row.prop(self, 'fstart', text='Frame Start')
             row.prop(self, 'fend', text='Frame End')
-            row = layout.row()    
-            row.prop(self, 'only_at_keyframe', text='Only at Keyframe')
+            layout.prop(self, 'one_key_per_frame')
+        
+        layout.separator()
         
 
     def execute(self, context):
@@ -871,6 +991,7 @@ class ARP_OT_childof_switcher(Operator):
         try:      
             if self.bake_type == 'STATIC':
                 _childof_switcher(self)
+                
             elif self.bake_type == 'ANIM':
                 # set autokey on
                 autokey_state = context.scene.tool_settings.use_keyframe_insert_auto
@@ -878,81 +999,55 @@ class ARP_OT_childof_switcher(Operator):
                 
                 context.scene.frame_set(self.fstart)
                 
-                pb = context.selected_pose_bones[0]               
-                base_transform = pb.location.copy(), pb.rotation_euler.copy(), pb.rotation_quaternion.copy(), pb.scale.copy()
+                pb = context.selected_pose_bones[0]     
+                armature = bpy.context.active_object
                 
+                # store current transforms
+                saved_transforms = {}
+                for i in range(self.fstart, self.fend+1):
+                    context.scene.frame_set(i)
+                    saved_transforms[i] = pb.location.copy(), pb.rotation_euler.copy(), pb.rotation_quaternion.copy(), pb.scale.copy()                    
+                                
+                # store current constraint influences
                 cns_dict = {}
                 
                 for cns in pb.constraints:
                     if cns.type == 'CHILD_OF':
                         cns_dict[cns.name] = cns.influence
-
-                # NID, this branch is added by NID
-                if self.only_at_keyframe is True:
-
-                    # prepass, 
-                    # key child of cns influences at every keyframe 
-                    # if no prepass, influences might change unexpectedly after jump to the next keyframe
-                    #
-                    # for example: location keyframe at 0, 10, 20, but child of cns influences are not keyed
-                    # influences A == 1, B == 0
-                    # if we switch child of at 0, then jump to 10, then A == 0, B == 1
-                    # but, at that time, location is not recalculated, causing final transform to difer from original
-                    #
-
-                    context.scene.frame_set(self.fstart-1)
-                    prev_frame = self.fstart-1
-
-                    for i in range(self.fstart, self.fend+1):
-
-                        bpy.ops.screen.keyframe_jump(next=True)
-
-                        if context.scene.frame_current > self.fend or context.scene.frame_current < self.fstart or prev_frame == context.scene.frame_current:
-                            break
-
-                        prev_frame = context.scene.frame_current
-
-                        bpy.ops.arp.childof_keyer()
-
-                    # normal pass
-
-                    context.scene.frame_set(self.fstart-1)
-                    prev_frame = self.fstart-1
+                
+                
+                frames_idx = []
+                if not self.one_key_per_frame:
+                    bname = pb.name
                     
-                    for i in range(self.fstart, self.fend+1):
-
-                        bpy.ops.screen.keyframe_jump(next=True)
-
-                        if context.scene.frame_current > self.fend or context.scene.frame_current < self.fstart or prev_frame == context.scene.frame_current:
-                            break
-
-                        prev_frame = context.scene.frame_current
-
-                        # and constraints
-                        for cns_name in cns_dict:
-                            pb.constraints.get(cns_name).influence = cns_dict[cns_name]
+                    for fc in armature.animation_data.action.fcurves:
+                        if fc.data_path.startswith('pose.bones["'+bname+'"].'):
+                            for keyf in fc.keyframe_points:
+                                if keyf.co[0] >= self.fstart and keyf.co[0] <= self.fend:
+                                    if not keyf.co[0] in frames_idx:
+                                        frames_idx.append(keyf.co[0])
+                                
+                
+                # snap
+                for i in range(self.fstart, self.fend+1):
+                
+                    if not self.one_key_per_frame:# only existing keyframes?
+                        if not i in frames_idx:
+                            continue
                         
-                        # reset the initial transforms          
-                        pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = base_transform
-                        
-                        _childof_switcher(self)
-
-
-                # NID, this branch is original
-                else:
-
-                    for i in range(self.fstart, self.fend+1):
-                        print("SNAP FRAME", i)                              
-                        context.scene.frame_set(i)
-                        
-                        # and constraints
-                        for cns_name in cns_dict:
-                            pb.constraints.get(cns_name).influence = cns_dict[cns_name]
-                        
-                        # reset the initial transforms          
-                        pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = base_transform
-                        
-                        _childof_switcher(self)
+                    print("SNAP FRAME", i)                              
+                    context.scene.frame_set(i)
+                    
+                    # and constraints
+                    for cns_name in cns_dict:
+                        pb.constraints.get(cns_name).influence = cns_dict[cns_name]
+                    
+                    # reset the initial transforms          
+                    pb.location, pb.rotation_euler, pb.rotation_quaternion, pb.scale = saved_transforms[i]
+                    
+                    update_transform()# need update hack
+                    
+                    _childof_switcher(self)
                    
                 # restore autokey state
                 context.scene.tool_settings.use_keyframe_insert_auto = autokey_state
@@ -1022,7 +1117,8 @@ class ARP_OT_rotation_mode_convert(Operator):
             
         return {'FINISHED'}
         
-        
+# disable for now. Double IK constraints lead to wobbly bones in Blender 4+. Todo later
+'''        
 class ARP_OT_switch_snap_root_tip_all(Operator):
     """Switch and snap all fingers IK Root-Tip"""
 
@@ -1057,7 +1153,7 @@ class ARP_OT_switch_snap_root_tip_all(Operator):
 
         return {'FINISHED'}
 
-
+'''
 class ARP_OT_switch_all_fingers(Operator):
     """Set all fingers to IK or FK"""
 
@@ -1139,31 +1235,6 @@ class ARP_OT_free_parent_ik_fingers(Operator):
         return {'FINISHED'}
 
 
-class ARP_OT_toggle_layers(Operator):
-    """Toggle controller layers visibility"""
-
-    bl_idname = "arp.toggle_layers"
-    bl_label = "toggle_layers"
-    bl_options = {'UNDO'}
-
-    layer_idx : IntProperty(name="Layer Index", default=0)
-
-    @classmethod
-    def poll(cls, context):
-        if context.active_object != None:
-            if context.active_object.type == "ARMATURE":
-                return True
-
-    def execute(self, context):
-        try:
-            arm = bpy.context.active_object
-            arm.data.layers[self.layer_idx] = not arm.data.layers[self.layer_idx]
-        finally:
-            pass
-            
-        return {'FINISHED'}
-
-
 class ARP_OT_snap_head(Operator):
     """Switch the Head Lock and snap the head rotation"""
 
@@ -1219,7 +1290,6 @@ class ARP_OT_reset_script(Operator):
 
 
 class ARP_OT_set_picker_camera_func(Operator):
-
     """Display the bone picker of the selected character in this active view"""
 
     bl_idname = "id.set_picker_camera_func"
@@ -1342,23 +1412,29 @@ class ARP_OT_arp_snap_pole(Operator):
 
 class ARP_OT_arm_bake_fk_to_ik(Operator):
     """Snaps and bake an FK to an IK arm over a specified frame range"""
-
+    
     bl_idname = "pose.arp_bake_arm_fk_to_ik"
     bl_label = "Snap an FK to IK arm over a specified frame range"
     bl_options = {'UNDO'}
-
+    
     side : StringProperty(name="bone side")
     frame_start : IntProperty(name="Frame start", default=0)
     frame_end : IntProperty(name="Frame end", default=10)
     get_sel_side: BoolProperty(default=True)
-
+    one_key_per_frame: BoolProperty(default=True, description="Insert one keyframe per frame if enabled, otherwise only existing keyframes within the given frame range will be keyframed (less accurate)", name="Key All Frames")
+    
+    
     @classmethod
     def poll(cls, context):
         return (context.active_object != None and context.mode == 'POSE')
-
-
+    
+    
     def draw(self, context):
         layout = self.layout
+        col = layout.column(align=True)
+        col.prop(self, 'one_key_per_frame')
+        col.separator()
+        
         row = layout.column().row(align=True)
         row.prop(self, 'frame_start', text='Frame Start')
         row.prop(self, 'frame_end', text='Frame End')
@@ -1389,6 +1465,7 @@ class ARP_OT_arm_bake_fk_to_ik(Operator):
                 self.side = get_bone_side(bname)
 
             bake_fk_to_ik_arm(self)
+            
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
             # restore autokey state
@@ -1439,13 +1516,19 @@ class ARP_OT_arm_bake_ik_to_fk(Operator):
     frame_start : IntProperty(name="Frame start", default=0)
     frame_end : IntProperty(name="Frame end", default=10)
     get_sel_side: BoolProperty(default=True)
-
+    one_key_per_frame: BoolProperty(default=True, description="Insert one keyframe per frame if enabled, otherwise only existing keyframes within the given frame range will be keyframed (less accurate)", name="Key All Frames")
+    
+    
     @classmethod
     def poll(cls, context):
         return (context.active_object != None and context.mode == 'POSE')
 
     def draw(self, context):
         layout = self.layout
+        col = layout.column(align=True)
+        col.prop(self, 'one_key_per_frame')
+        col.separator()
+        
         row = layout.column().row(align=True)
         row.prop(self, 'frame_start', text='Frame Start')
         row.prop(self, 'frame_end', text='Frame End')
@@ -1510,8 +1593,10 @@ class ARP_OT_arm_ik_to_fk(Operator):
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
         return {'FINISHED'}
+        
 
-
+# disable for now, double IK constraints lead to wobbly bones in Blender 4+. Todo later
+'''
 class ARP_OT_switch_snap_root_tip(Operator):
     """Switch and snap fingers IK Root-Tip"""
 
@@ -1552,18 +1637,19 @@ class ARP_OT_switch_snap_root_tip(Operator):
             context.preferences.edit.use_global_undo = use_global_undo
 
         return {'FINISHED'}
-
+'''
 
 class ARP_OT_switch_snap(Operator):
     """Switch and snap the IK-FK"""
 
-    bl_idname = "pose.arp_switch_snap"
-    bl_label = "Arp Switch and Snap IK FK"
+    bl_idname = 'pose.arp_switch_snap'
+    bl_label = 'Arp Switch and Snap IK FK'
     bl_options = {'UNDO'}
 
-    side : StringProperty(name="bone side")
-    type : StringProperty(name="type", default="")
-    finger_root_name: StringProperty(name="", default="")
+    side : StringProperty(name='bone side')
+    type : StringProperty(name='type', default='')
+    finger_root_name: StringProperty(name='', default='')
+    spline_name: StringProperty(name='', default='')
 
     @classmethod
     def poll(cls, context):
@@ -1578,11 +1664,11 @@ class ARP_OT_switch_snap(Operator):
             self.side = get_bone_side(bname)
 
             if is_selected(fk_leg, bname) or is_selected(ik_leg, bname):
-                self.type = "LEG"
+                self.type = 'LEG'
             elif is_selected(fk_arm, bname) or is_selected(ik_arm, bname):
-                self.type = "ARM"
+                self.type = 'ARM'
             elif is_selected(fingers_start, bname, startswith=True):
-                self.type = "FINGER"
+                self.type = 'FINGER'
 
                 finger_type = None
                 for type in fingers_type_list:
@@ -1590,29 +1676,40 @@ class ARP_OT_switch_snap(Operator):
                         finger_type = type
                         break
 
-                self.finger_root_name = "c_"+finger_type+"1_base"+self.side
+                self.finger_root_name = 'c_'+finger_type+'1_base'+self.side 
+                
+            elif is_selected('c_spline_', bname, startswith=True) or is_selected_prop(context.active_pose_bone, 'arp_spline'):
+                self.type = 'SPLINE_IK'
 
-            if self.type == "ARM":
+            if self.type == 'ARM':
                 hand_ik = get_pose_bone(ik_arm[2] + self.side)
                 if hand_ik['ik_fk_switch'] < 0.5:
                     fk_to_ik_arm(context.active_object, self.side)
                 else:
                     ik_to_fk_arm(context.active_object, self.side)
 
-            elif self.type == "LEG":
+            elif self.type == 'LEG':
                 foot_ik = get_pose_bone(ik_leg[2] + self.side)
                 if foot_ik['ik_fk_switch'] < 0.5:
                     fk_to_ik_leg(context.active_object, self.side)
                 else:
                     ik_to_fk_leg(context.active_object, self.side)
 
-            elif self.type == "FINGER":
+            elif self.type == 'FINGER':
                 root_finger = get_pose_bone(self.finger_root_name)
                 if root_finger['ik_fk_switch'] < 0.5:
                     fk_to_ik_finger(root_finger, self.side)
                 else:
                     ik_to_fk_finger(root_finger, self.side)
 
+            elif self.type == 'SPLINE_IK':
+                c_spline_root = get_pose_bone('c_'+self.spline_name+'_root'+self.side)
+                if 'ik_fk_switch' in c_spline_root.keys():
+                    if c_spline_root['ik_fk_switch'] < 0.5:
+                        fk_to_ik_spline(context.active_object, self.spline_name, self.side)
+                    else:
+                        ik_to_fk_spline(context.active_object, self.spline_name, self.side)
+            
         finally:
             context.preferences.edit.use_global_undo = use_global_undo
 
@@ -1632,6 +1729,7 @@ class ARP_OT_leg_bake_fk_to_ik(Operator):
     frame_end : IntProperty(name="Frame end", default=10)
     temp_frame_start = 0
     temp_frame_end = 1
+    one_key_per_frame: BoolProperty(default=True, description="Insert one keyframe per frame if enabled, otherwise only existing keyframes within the given frame range will be keyframed (less accurate)", name="Key All Frames")
 
     @classmethod
     def poll(cls, context):
@@ -1641,6 +1739,8 @@ class ARP_OT_leg_bake_fk_to_ik(Operator):
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
+        col.prop(self, 'one_key_per_frame')
+        col.separator()
         row = col.row(align=True)
         row.prop(self, 'frame_start', text='Frame Start')
         row.prop(self, 'frame_end', text='Frame End')
@@ -1695,6 +1795,7 @@ class ARP_OT_leg_fk_to_ik(Operator):
     bl_options = {'UNDO'}
 
     side : StringProperty(name="bone side")
+    
 
     @classmethod
     def poll(cls, context):
@@ -1726,13 +1827,18 @@ class ARP_OT_leg_bake_ik_to_fk(Operator):
     get_sel_side: BoolProperty(default=True)
     frame_start : IntProperty(name="Frame start", default=0)
     frame_end : IntProperty(name="Frame end", default=10)
-
+    one_key_per_frame: BoolProperty(default=True, description="Insert one keyframe per frame if enabled, otherwise only existing keyframes within the given frame range will be keyframed (less accurate)", name="Key All Frames")
+    
     @classmethod
     def poll(cls, context):
         return (context.active_object != None and context.mode == 'POSE')
 
     def draw(self, context):
         layout = self.layout
+        col = layout.column(align=True)
+        col.prop(self, 'one_key_per_frame')
+        col.separator()
+        
         row = layout.column().row(align=True)
         row.prop(self, 'frame_start', text='Frame Start')
         row.prop(self, 'frame_end', text='Frame End')
@@ -1800,37 +1906,72 @@ class ARP_OT_leg_ik_to_fk(Operator):
 
 
 
-###FUNCTIONS ##############################################
-# Functions Utils
-def _rotate_point(point_loc, angle, axis, origin):
-    # rotate the point_loc (vector 3) around the "axis" (vector 3) 
-    # for the angle value (radians)
-    # around the origin (vector 3)
-    rot_mat = Matrix.Rotation(angle, 4, axis.normalized())
-    loc = point_loc.copy()
-    loc = loc - origin
-    point_mat = Matrix.Translation(loc).to_4x4()
-    point_mat_rotated = rot_mat @ point_mat
-    loc, rot, scale = point_mat_rotated.decompose()
-    loc = loc + origin
-    return loc
+# UTILS --------------------------------------------------------------
+
+#   Misc
+def update_transform():   
+    # hack to trigger the update with a blank rotation operator
+    bpy.ops.transform.rotate(value=0, orient_axis='Z', orient_type='VIEW', orient_matrix=((0.0, 0.0, 0), (0, 0.0, 0.0), (0.0, 0.0, 0.0)), orient_matrix_type='VIEW', mirror=False)
     
     
-def compensate_ik_pole_position(fk1, fk2, ik1, ik2, pole):
-    angle_offset = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
-    i = 0
-    dir = 1
-    while (angle_offset > 0.005 and i < 6):
-        print('Correcting IK pole snap', i)
-        axis = (ik2.tail-ik1.head)
-        origin = (fk2.tail + fk1.head) / 2
-        pole_rotated = _rotate_point(pole.head, angle_offset*dir, axis, origin)        
-        snap_pos_matrix(pole, Matrix.Translation(pole_rotated))
-        new_angle = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
-        if new_angle > angle_offset:# wrong direction!            
-            dir *= -1
-        angle_offset = new_angle
-        i += 1
+#   Utils Bones
+
+def is_selected(names, selected_bone_name, startswith=False):
+    bone_side = get_bone_side(selected_bone_name)
+    if startswith == False:
+        if type(names) == list:
+            for name in names:
+                if not "." in name[-2:]:
+                    if name + bone_side == selected_bone_name:
+                        return True
+                else:
+                    if name[-2:] == ".x":
+                        if name[:-2] + bone_side == selected_bone_name:
+                            return True
+        elif names == selected_bone_name:
+            return True
+    else:#startswith
+        if type(names) == list:
+            for name in names:
+                if selected_bone_name.startswith(name):
+                    return True
+        else:
+            return selected_bone_name.startswith(names)
+    return False
+
+
+def is_selected_prop(pbone, prop_name):
+    if pbone.bone.keys():
+        if prop_name in pbone.bone.keys():
+            return True
+            
+
+def get_data_bone(name):
+    return bpy.context.active_object.data.bones.get(name)
+    
+
+def get_pose_bone(name):
+    return bpy.context.active_object.pose.bones.get(name)
+    
+    
+def get_edit_bone(name):
+    return bpy.context.active_object.data.edit_bones.get(name)
+
+
+def get_selected_pbone_name():
+    try:
+        return bpy.context.selected_pose_bones[0].name#bpy.context.active_pose_bone.name
+    except:
+        return
+        
+
+def get_bone_side(bone_name):
+    side = ""
+    if not "_dupli_" in bone_name:
+        side = bone_name[-2:]
+    else:
+        side = bone_name[-12:]
+    return side
     
     
 def keyframe_pb_transforms(pb, loc=True, rot=True, scale=True, keyf_locked=False):
@@ -1852,13 +1993,141 @@ def keyframe_pb_transforms(pb, loc=True, rot=True, scale=True, keyf_locked=False
             if not j or keyf_locked:
                 pb.keyframe_insert(data_path='scale', index=i)
 
-    
-                    
-def get_pinned_props_list(rig):
-    current_pinned_string = rig.data["arp_pinned_props"]
-    return current_pinned_string.split(',')
 
-                
+def set_pose_rotation(pose_bone, mat):
+    q = mat.to_quaternion()
+
+    if pose_bone.rotation_mode == 'QUATERNION':
+        pose_bone.rotation_quaternion = q
+    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
+        pose_bone.rotation_axis_angle[0] = q.angle
+        pose_bone.rotation_axis_angle[1] = q.axis[0]
+        pose_bone.rotation_axis_angle[2] = q.axis[1]
+        pose_bone.rotation_axis_angle[3] = q.axis[2]
+    else:
+        pose_bone.rotation_euler = q.to_euler(pose_bone.rotation_mode)
+        
+     
+def snap_pos_matrix(pose_bone, target_bone_matrix):
+    # Snap a bone to a defined transform matrix
+    # Supports child of constraints and parent
+
+    # if the pose_bone has direct parent
+    if pose_bone.parent:       
+        pose_bone.matrix = target_bone_matrix.copy()        
+        update_transform()
+    else:
+        # is there a child of constraint attached?
+        child_of_cns = None
+        if len(pose_bone.constraints):
+            all_child_of_cns = [i for i in pose_bone.constraints if i.type == "CHILD_OF" and i.influence == 1.0 and i.mute == False and i.target]
+            if len(all_child_of_cns):
+                child_of_cns = all_child_of_cns[0]# in case of multiple child of constraints enabled, use only the first for now
+
+        if child_of_cns:
+            if child_of_cns.subtarget != "" and get_pose_bone(child_of_cns.subtarget):              
+                pose_bone.matrix = get_pose_bone(child_of_cns.subtarget).matrix_channel.inverted_safe() @ target_bone_matrix                
+                update_transform()
+            else:
+                pose_bone.matrix = target_bone_matrix.copy()
+        else:
+            pose_bone.matrix = target_bone_matrix.copy()
+            
+
+def snap_rot(pose_bone, target_bone):
+    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
+    set_pose_rotation(pose_bone, mat)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='POSE')
+    
+
+def zero_out_pb(pbone):
+    pbone.location = [0,0,0]
+    pbone.rotation_euler = [0,0,0]
+    pbone.rotation_quaternion = [1,0,0,0]
+    pbone.scale = [1,1,1]     
+        
+
+#   Utils Constraints
+def get_active_child_of_cns(bone):
+    constraint = None
+    bparent_name = ""
+    parent_type = ""
+    valid_constraint = True
+
+    if len(bone.constraints) > 0:
+        for c in bone.constraints:
+            if not c.mute and c.influence > 0.5 and c.type == 'CHILD_OF':
+                if c.target:
+                    if c.target.type == 'ARMATURE':# bone
+                        bparent_name = c.subtarget
+                        parent_type = "bone"
+                        constraint = c
+                    else:# object
+                        bparent_name = c.target.name
+                        parent_type = "object"
+                        constraint = c
+
+    if constraint:
+        if parent_type == "bone":
+            if bparent_name == "":
+                valid_constraint = False
+
+    return constraint, bparent_name, parent_type, valid_constraint
+
+    
+#   Utils Maths
+def project_point_onto_plane(q, p, n):
+    n = n.normalized()
+    return q - ((q - p).dot(n)) * n
+
+
+def get_pose_matrix_in_other_space(mat, pose_bone):
+    rest = pose_bone.bone.matrix_local.copy()
+    rest_inv = rest.inverted()
+    par_mat = Matrix()
+    par_inv = Matrix()
+    par_rest = Matrix()
+    
+    # bone parent case
+    if pose_bone.parent and pose_bone.bone.use_inherit_rotation:
+        par_mat = pose_bone.parent.matrix.copy()
+        par_inv = par_mat.inverted()
+        par_rest = pose_bone.parent.bone.matrix_local.copy()
+    # bone parent as constraint case
+    elif len(pose_bone.constraints):
+        for cns in pose_bone.constraints:
+            if cns.type != 'ARMATURE':
+                continue
+            for tar in cns.targets:
+                if tar.subtarget != '':
+                    if tar.weight > 0.5:# not ideal, but take the bone as parent if influence is above average
+                        par_bone = get_pose_bone(tar.subtarget)
+                        par_mat = par_bone.matrix.copy()
+                        par_inv = par_mat.inverted()
+                        par_rest = par_bone.bone.matrix_local.copy()
+                        break
+
+    smat = rest_inv @ (par_rest @ (par_inv @ mat))
+
+    return smat
+    
+    
+def _rotate_point(point_loc, angle, axis, origin):
+    # rotate the point_loc (vector 3) around the "axis" (vector 3) 
+    # for the angle value (radians)
+    # around the origin (vector 3)
+    rot_mat = Matrix.Rotation(angle, 4, axis.normalized())
+    loc = point_loc.copy()
+    loc = loc - origin
+    point_mat = Matrix.Translation(loc).to_4x4()
+    point_mat_rotated = rot_mat @ point_mat
+    loc, rot, scale = point_mat_rotated.decompose()
+    loc = loc + origin
+    return loc    
+    
+ 
+#   Utils Props
 def set_prop_setting(node, prop_name, setting, value):
     if bpy.app.version >= (3,0,0):
         ui_data = node.id_properties_ui(prop_name)
@@ -1913,21 +2182,11 @@ def create_custom_prop(node=None, prop_name="", prop_val=1.0, prop_min=0.0, prop
     node.property_overridable_library_set('["'+prop_name+'"]', True)
     
 
+#   Utils Objects
 def get_object(name):
     return bpy.data.objects.get(name)
     
-        
-def search_layer_collection(layerColl, collName):
-    # Recursivly transverse layer_collection for a particular name
-    found = None
-    if (layerColl.name == collName):
-        return layerColl
-    for layer in layerColl.children:
-        found = search_layer_collection(layer, collName)
-        if found:
-            return found
-            
-            
+    
 def hide_object(obj_to_set):
     try:# object may not be in current view layer
         obj_to_set.hide_set(True)
@@ -1956,23 +2215,25 @@ def is_object_arp(object):
             return True
             
 
-def get_selected_pbone_name():
-    try:
-        return bpy.context.selected_pose_bones[0].name#bpy.context.active_pose_bone.name
-    except:
-        return
-        
-
-def get_bone_side(bone_name):
-    side = ""
-    if not "_dupli_" in bone_name:
-        side = bone_name[-2:]
-    else:
-        side = bone_name[-12:]
-    return side
+#   Utils layers
+def search_layer_collection(layerColl, collName):
+    # Recursivly transverse layer_collection for a particular name
+    found = None
+    if (layerColl.name == collName):
+        return layerColl
+    for layer in layerColl.children:
+        found = search_layer_collection(layer, collName)
+        if found:
+            return found
 
 
-# Functions Operators
+
+# OPERATOR FUNCTIONS  ------------------------------------------------------------------
+def get_pinned_props_list(rig):
+    current_pinned_string = rig.data["arp_pinned_props"]
+    return current_pinned_string.split(',')
+    
+    
 def _childof_keyer(pb):  
     for cns in pb.constraints:
         if cns.type == 'CHILD_OF':
@@ -2016,7 +2277,7 @@ def _childof_switcher(self):
             if debug:
                 print("enable constraint:", cns.name)
             parent_type = 'bone' if cns.subtarget else 'object'
-            parent_name = cns.subtarget if parent_type == 'bone' else cns.target.name       
+            parent_name = cns.subtarget if parent_type == 'bone' else cns.target.name            
             
             if debug:
                 print("MAT INIT")
@@ -2031,24 +2292,25 @@ def _childof_switcher(self):
             # snap
             if parent_type == 'bone':
 
-                # NID
+                # NID 
+                # parent bone might not be in the same armature
+                # & armature object might have transform too
                 # ARP Original
-                # bone_parent = get_pose_bone(parent_name)
-                # pb.matrix = cns.inverse_matrix.inverted() @ bone_parent.matrix.inverted() @ mat_prev
-                # END NID
+                if False:
+                    bone_parent = get_pose_bone(parent_name)
+                    pb.matrix = cns.inverse_matrix.inverted() @ bone_parent.matrix.inverted() @ mat_prev
+                # NID new
+                else:
 
-                # NID
-                # modified
-                parent_obj_name = cns.target.name
-                parent_bone_name = cns.subtarget
+                    parent_obj_name = cns.target.name
+                    parent_bone_name = cns.subtarget
 
-                parent_obj = get_object(parent_obj_name)
+                    parent_obj = get_object(parent_obj_name)
 
-                parent_bone = parent_obj.pose.bones.get(parent_bone_name)
+                    parent_bone = parent_obj.pose.bones.get(parent_bone_name)
 
-                pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ parent_obj.matrix_world.inverted() @ mat_prev
-                # pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ mat_prev
-                # END NID
+                    pb.matrix = cns.inverse_matrix.inverted() @ parent_bone.matrix.inverted() @ parent_obj.matrix_world.inverted() @ mat_prev
+                # NID end
 
                 update_transform()
                 
@@ -2081,6 +2343,7 @@ def _childof_switcher(self):
             enable_cns(cns)
     
 
+#   Rig Layers
 def _export_layers_sets(self):
     scn = bpy.context.scene
     rig = bpy.context.active_object
@@ -2108,8 +2371,19 @@ def _export_layers_sets(self):
         # name
         layer_dict['name'] = layerset.name
         
-        # layers
-        layer_dict['layers'] = [i for i in layerset.layers]
+        # bones collections/layers
+        if bpy.app.version >= (4,0,0):          
+            bones_collec_names = []
+            for item in layerset.bonecollections_set:
+                for col in rig.data.collections:
+                    if 'collec_id' in col.keys():
+                        if col['collec_id'] == item.collec_id:
+                            bones_collec_names.append(col.name)
+            
+            layer_dict['bonecollections_set'] = bones_collec_names
+            
+        else:
+            layer_dict['layers'] = [i for i in layerset.layers]
         
         # objects
         objects_names = []
@@ -2161,8 +2435,22 @@ def _import_layers_sets(self):
         # name
         layerset.name = layer_name
         
-        # layers
-        layerset.layers = layers_set_dict[layer_name]['layers']
+        # bones collections/layers
+        if bpy.app.version >= (4,0,0):
+            bones_col_names = layers_set_dict[layer_name]['bonecollections_set']
+            if len(bones_col_names):
+                for collec_name in bones_col_names:
+                    col = rig.data.collections.get(collec_name)
+                    if col:                       
+                        item = layerset.bonecollections_set.add()
+                        col_id = None
+                        if 'collec_id' in col.keys():
+                            col_id = col['collec_id']
+                        else:
+                            col_id = generate_collec_id(col.name)
+                        item.collec_id = col_id
+        else:
+            layerset.layers = layers_set_dict[layer_name]['layers']
         
         # objects
         objects_set = layers_set_dict[layer_name]['objects_set']
@@ -2172,7 +2460,7 @@ def _import_layers_sets(self):
                     obj_i = layerset.objects_set.add()
                     obj_i.object_item = get_object(name)
                     
-        # collection
+        # object collection
         collec_name = layers_set_dict[layer_name]['collection']
         if collec_name != '':
             collec = bpy.data.collections.get(collec_name)
@@ -2193,10 +2481,34 @@ def draw_layer_set_edit(self, context):
     
     layout = self.layout
     
-    # layers
-    layout.label(text='Layers:')   
-    col = layout.column(align=True)   
-    col.prop(current_set, "layers", text="")
+    # bones layers/collection
+    if bpy.app.version >= (4,0,0):
+        layout.label(text='Bones Collections:')  
+        col = layout.column(align=True)
+        row = col.row(align=True)
+        row.prop_search(current_set, 'collection_to_add', rig.data, 'collections', text='')#prop_search(scn, "arp_eyeball_name_right", bpy.data, "objects", text="")
+        row.operator("arp.layers_sets_add_collection", text="", icon="ADD")
+        
+        col.separator()
+        
+        # display current bone collections in set
+        if len(current_set.bonecollections_set):
+            for item in current_set.bonecollections_set:
+                for collec in rig.data.collections:
+                    if 'collec_id' in collec.keys():
+                        if item.collec_id == collec['collec_id']:
+                            row2 = col.row(align=True)
+                            op = row2.operator('arp.delete_bone_collec', text='', icon = 'X')
+                            op.collec_id = item.collec_id
+                            row2.label(text=collec.name)
+                            continue
+        else:
+            col.label(text='No bones collections in this set')
+    
+    else:
+        layout.label(text='Layers:')
+        col = layout.column(align=True)   
+        col.prop(current_set, 'layers', text='')
    
     layout.separator()  
     
@@ -2204,17 +2516,21 @@ def draw_layer_set_edit(self, context):
     #print(current_set.bones)
     len_bones = str(len(ast.literal_eval(current_set.bones)))
     col = layout.column()
+    col.label(text='Bones:')
     row = col.row(align=True)
     row.operator("arp.layers_sets_add_bones", text="Add Selected Bones ("+len_bones+")")
     row.operator("arp.layers_sets_remove_bones", text="", icon="PANEL_CLOSE")
     
     # collection
     col = layout.column()
-    col.prop(current_set, "collection", text="Collection")    
+    col.label(text='Objects Collection:')
+    col.prop(current_set, 'collection', text='')
     
     # objects
+    col.separator()
+    col.label(text='Objects:')
     row = col.row(align=True)
-    row.prop(current_set, "object_to_add", text="Add Object")
+    row.prop(current_set, "object_to_add", text='')
     row.operator("arp.layers_sets_add_object", text="", icon="ADD")
    
     layout.operator("arp.layers_sets_clear_objects", text="Remove All Objects")
@@ -2236,13 +2552,24 @@ def set_layer_vis(self, state):
     rig = bpy.context.active_object
     scn = bpy.context.scene
     
+    if rig == None:# nothing selected
+        return
+        
     if rig.type != 'ARMATURE':
         return
     
-    # set armature layers visibility   
-    for i, lay in enumerate(self.layers):
-        if lay:
-            rig.data.layers[i] = state
+    # set armature bones collections/layers visibility   
+    if bpy.app.version >= (4,0,0):
+        for item in self.bonecollections_set:
+            for collec in rig.data.collections:
+                if 'collec_id' in collec.keys():
+                    if item.collec_id == collec['collec_id']:
+                        collec.is_visible = state
+
+    else:
+        for i, lay in enumerate(self.layers):
+            if lay:
+                rig.data.layers[i] = state
             
     # set bones visibility
     bones_names = ast.literal_eval(self.bones)
@@ -2259,7 +2586,7 @@ def set_layer_vis(self, state):
                 b.hide = not state
             
     
-    # set collection visibility
+    # set object collection visibility
     if self.collection != None: 
         # hide at collection level
         self.collection.hide_viewport = not state
@@ -2293,7 +2620,202 @@ def set_layer_vis(self, state):
                 obj.hide_render = True
              
 
+def _add_layer_set(self):
+    rig = bpy.context.active_object
+    
+    new_set = rig.layers_sets.add()
+    new_set.name = 'LayerSet'    
 
+    rig.layers_sets_idx = len(rig.layers_sets)-1    
+
+        
+def _remove_layer_set(self):
+    rig = bpy.context.active_object
+    
+    rig.layers_sets.remove(rig.layers_sets_idx)
+    
+    if rig.layers_sets_idx > len(rig.layers_sets)-1:
+        rig.layers_sets_idx = len(rig.layers_sets)-1
+        
+
+#   IK FK fingers
+def ik_to_fk_finger(root_finger, side):
+    finger_type = None
+    rig = bpy.context.active_object
+
+    for i in fingers_type_list:
+        if i in root_finger.name:
+            finger_type = i
+            break
+
+    ik_target_name = ""
+    #ik_tip = root_finger["ik_tip"]
+    ik_tip = 0
+    
+    if ik_tip == 1:# ik1
+        ik_target_name = "c_"+finger_type+"_ik"+side
+    elif ik_tip == 0:# ik2
+        ik_target_name = "c_"+finger_type+"_ik2"+side
+
+    ik_target = get_pose_bone(ik_target_name)
+    if ik_target == None:
+        print("Finger IK target not found:", ik_target_name)
+        return
+
+    ik_pole_name = "c_"+finger_type+"_pole"+side
+    ik_pole = get_pose_bone(ik_pole_name)
+    if ik_pole == None:
+        print("Finger IK pole not found:", ik_pole_name)
+        return
+
+    hand_b = get_data_bone("hand_ref"+side)
+
+    fingers_ik_pole_distance = 1.0
+    if "fingers_ik_pole_distance" in hand_b.keys():
+        fingers_ik_pole_distance = hand_b["fingers_ik_pole_distance"]
+
+    # Snap IK target
+        # constraint support
+    constraint, bparent_name, parent_type, valid_constraint = get_active_child_of_cns(ik_target)
+
+    finger3_fk = get_pose_bone("c_"+finger_type+"3"+side)
+    if constraint and valid_constraint:
+        if parent_type == "bone":
+            bone_parent = get_pose_bone(bparent_name)
+            ik_target.matrix = bone_parent.matrix_channel.inverted() @ finger3_fk.matrix
+            update_transform()
+            if ik_tip == 1:
+                # set head to tail position
+                tail_mat = bone_parent.matrix_channel.inverted() @ Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
+                ik_target.matrix = tail_mat @ ik_target.matrix
+
+        if parent_type == "object":
+            obj = bpy.data.objects.get(bparent_name)
+            ik_target.matrix = constraint.inverse_matrix.inverted() @ obj.matrix_world.inverted() @ finger3_fk.matrix
+            update_transform()
+            if ik_tip == 1:
+                # set head to tail position
+                tail_mat = constraint.inverse_matrix.inverted() @ obj.matrix_world.inverted() @ Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
+                ik_target.matrix = tail_mat @ ik_target.matrix
+    else:
+        ik_target.matrix = finger3_fk.matrix
+        update_transform()
+        if ik_tip == 1:
+            # set head to tail position
+            tail_mat = Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
+            ik_target.matrix = tail_mat @ ik_target.matrix
+
+    update_transform()
+
+    # Snap IK pole
+    fk_fingers = ["c_"+finger_type+"1"+side, "c_"+finger_type+"2"+side, "c_"+finger_type+"3"+side]
+    ik_fingers = ["c_"+finger_type+"1_ik"+side, "c_"+finger_type+"2_ik"+side, "c_"+finger_type+"3_ik"+side]
+
+    if ik_tip == 0:# only the first two phalanges must be snapped if ik2, since the last is the IK target
+        fk_fingers.pop()
+        ik_fingers.pop()
+
+    phal2 = get_pose_bone(fk_fingers[1])
+        # constraint support
+    pole_cns, bpar_name, par_type, valid_cns = get_active_child_of_cns(ik_pole)
+
+    if pole_cns and valid_cns:
+        bone_parent = get_pose_bone(bpar_name)
+        ik_pole.matrix = bone_parent.matrix_channel.inverted() @ Matrix.Translation((phal2.z_axis.normalized() * phal2.length * 1.3 * fingers_ik_pole_distance)) @ phal2.matrix
+    else:
+        ik_pole.matrix = Matrix.Translation((phal2.z_axis.normalized() * phal2.length * 1.3 * fingers_ik_pole_distance)) @ phal2.matrix
+
+    ik_pole.rotation_euler = [0,0,0]
+
+    update_transform()
+
+        # phalanges
+    for iter in range(0,4):
+        for i, bname in enumerate(ik_fingers):
+            b_ik = get_pose_bone(bname)
+            loc, scale = b_ik.location.copy(), b_ik.scale.copy()
+            b_fk = get_pose_bone(fk_fingers[i])
+            b_ik.matrix = b_fk.matrix
+            # restore loc and scale, only rotation for better results
+            b_ik.location = loc
+            b_ik.scale = scale
+            # update hack
+            update_transform()
+
+     # Switch prop
+    root_finger['ik_fk_switch'] = 0.0
+
+    # udpate hack
+    update_transform()
+
+    #insert key if autokey enable
+    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
+        root_finger.keyframe_insert(data_path='["ik_fk_switch"]')
+
+        for bname in ik_fingers + fk_fingers + [ik_target.name]:
+            pb = get_pose_bone(bname)
+            pb.keyframe_insert(data_path="location")
+            if pb.rotation_mode != "QUATERNION":
+                pb.keyframe_insert(data_path="rotation_euler")
+            else:
+                pb.keyframe_insert(data_path="rotation_quaternion")
+            
+            for i, j in enumerate(pb.lock_scale):
+                if not j:
+                    pb.keyframe_insert(data_path="scale", index=i)
+          
+
+def fk_to_ik_finger(root_finger, side):
+    finger_type = None
+
+    for i in fingers_type_list:
+        if i in root_finger.name:
+            finger_type = i
+            break
+    '''
+    ik_target_name = "c_"+finger_type+"_ik"+side
+    ik_target = get_pose_bone(ik_target_name)
+    if ik_target == None:
+        print("Finger IK target not found:", ik_target_name)
+        return
+    '''
+    
+    # snap
+    fk_fingers = ["c_"+finger_type+"1"+side, "c_"+finger_type+"2"+side, "c_"+finger_type+"3"+side]
+    ik_fingers = ["c_"+finger_type+"1_ik"+side, "c_"+finger_type+"2_ik"+side, "c_"+finger_type+"3_ik"+side]
+
+    for i in range(0,2):
+        for i, name in enumerate(fk_fingers):
+            b_fk = get_pose_bone(name)
+            b_ik = get_pose_bone(ik_fingers[i])
+            b_fk.matrix = b_ik.matrix
+
+            # udpate hack
+            update_transform()
+
+     #switch
+    root_finger['ik_fk_switch'] = 1.0
+
+    # udpate hack
+    update_transform()
+
+    #insert key if autokey enable
+    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
+        root_finger.keyframe_insert(data_path='["ik_fk_switch"]')
+
+        for bname in ik_fingers + fk_fingers:# + [ik_target.name]:
+            pb = get_pose_bone(bname)
+            pb.keyframe_insert(data_path="location")
+            if pb.rotation_mode != "QUATERNION":
+                pb.keyframe_insert(data_path="rotation_euler")
+            else:
+                pb.keyframe_insert(data_path="rotation_quaternion")
+            
+            for i, j in enumerate(pb.lock_scale):
+                if not j:
+                    pb.keyframe_insert(data_path="scale", index=i) 
+                    
+                    
 def tip_to_root_finger(root_finger, side):
     scn = bpy.context.scene
 
@@ -2312,7 +2834,8 @@ def tip_to_root_finger(root_finger, side):
     ik_target = get_pose_bone(ik_target_name)
     ik_target2 = get_pose_bone(ik_target2_name)
 
-    if ik_target == None or ik_target2 == None:
+    #if ik_target == None or ik_target2 == None:
+    if ik_target2 == None:
         print("Finger IK target not found:", ik_target_name)
         return
 
@@ -2485,480 +3008,35 @@ def root_to_tip_finger(root_finger, side):
                     pb.keyframe_insert(data_path="scale", index=i)
        
 
-def _switch_snap_pin(side, type):
-    if type == "leg":
-        c_leg_stretch = get_pose_bone("c_stretch_leg"+side)
-        if c_leg_stretch == None:
-            print("No 'c_stretch_leg' bone found")
-            return
-
-        c_leg_pin = get_pose_bone("c_stretch_leg_pin"+side)
-        if c_leg_pin == None:
-            print("No 'c_leg_stretch_pin' bone found")
-            return
-
-        if c_leg_stretch["leg_pin"] == 0.0:
-            c_leg_pin.matrix = c_leg_stretch.matrix
-            c_leg_stretch["leg_pin"] = 1.0
-        else:
-            c_leg_stretch["leg_pin"] = 0.0
-            c_leg_stretch.matrix = c_leg_pin.matrix
-
-    if type == "arm":
-        c_arm_stretch = get_pose_bone("c_stretch_arm"+side)
-        if c_arm_stretch == None:
-            print("No 'c_stretch_arm' bone found")
-            return
-
-        c_arm_pin = get_pose_bone("c_stretch_arm_pin"+side)
-        if c_arm_pin == None:
-            print("No 'c_stretch_arm_pin' bone found")
-            return
-        
-        # NID, new ik elbow pin snapping
-        c_arm_pole = get_pose_bone("c_arms_pole"+side)
-        if c_arm_pole == None:
-            print("No 'c_arms_pole' bone found")
-            return
-        # NID END
-
-        if c_arm_stretch["elbow_pin"] == 0.0:
-            c_arm_pin.matrix = c_arm_stretch.matrix
-            c_arm_stretch["elbow_pin"] = 1.0
-        else:
-            c_arm_stretch["elbow_pin"] = 0.0
-            c_arm_stretch.matrix =  c_arm_pin.matrix
-            # NID, new ik elbow pin snapping
-            c_arm_pole.matrix =  c_arm_pin.matrix
-            # NID END
-
-
-def _set_picker_camera(self):
-    # go to object mode
-    bpy.ops.object.mode_set(mode='OBJECT')
-
-    #save current scene camera
-    current_cam = bpy.context.scene.camera
-
-    rig = bpy.data.objects.get(bpy.context.active_object.name)
-    
-    bpy.ops.object.select_all(action='DESELECT')
-    
-    cam_ui = None
-    rig_ui = None
-    ui_mesh = None
-    char_name_text = None
-    
-    is_a_proxy = False
-    if 'proxy_collection' in dir(rig):# proxy support
-        if rig.proxy_collection:
-            is_a_proxy = True
-            children = rig.proxy_collection.instance_collection.all_objects
-    if not is_a_proxy:
-        children = rig.children
-
-    for child in children:
-        if child.type == 'CAMERA' and 'cam_ui' in child.name:
-            cam_ui = child
-        if child.type == 'EMPTY' and 'rig_ui' in child.name:
-            rig_ui = child
-            for _child in rig_ui.children:
-                if _child.type == 'MESH' and 'mesh' in _child.name:
-                    ui_mesh = _child
-
-    # if the picker is not there, escape
-    if rig_ui == None and is_proxy(rig) == False:
-        self.report({'INFO'}, 'No picker found, click "Add Picker" to add one.')
-        return
-
-    # ui cam not found, add one
-    active_obj_name = bpy.context.active_object.name
-    if not cam_ui:
-        bpy.ops.object.camera_add(align="VIEW", enter_editmode=False, location=(0, 0, 0), rotation=(0, 0, 0))
-        # set cam data
-        bpy.context.active_object.name = "cam_ui"
-        cam_ui = bpy.data.objects["cam_ui"]
-        cam_ui.data.type = "ORTHO"
-        cam_ui.data.display_size = 0.1
-        cam_ui.data.show_limits = False
-        cam_ui.data.show_passepartout = False
-        cam_ui.parent = bpy.data.objects[active_obj_name]
-
-        # set collections
-        for col in bpy.data.objects[active_obj_name].users_collection:
-            try:
-                col.objects.link(cam_ui)
-            except:
-                pass
-
-    set_active_object(active_obj_name)
-
-    if cam_ui:
-        # lock the camera transforms
-        ##cam_ui.lock_location[0]=cam_ui.lock_location[1]=cam_ui.lock_location[2]=cam_ui.lock_rotation[0]=cam_ui.lock_rotation[1]=cam_ui.lock_rotation[2] = True
-        #cam_ui.select_set(state=1)
-        #bpy.context.view_layer.objects.active = cam_ui
-        #bpy.ops.view3d.object_as_camera()
-        
-        space_data = bpy.context.space_data
-        space_data.use_local_camera = True
-        space_data.camera = cam_ui
-        space_data.region_3d.view_perspective = "CAMERA"
-
-        # set viewport display options
-        ##bpy.context.space_data.lock_camera_and_layers = False
-        space_data.overlay.show_relationship_lines = False
-        space_data.overlay.show_text = False
-        space_data.overlay.show_cursor = False
-        current_area = bpy.context.area
-        space_view3d = [i for i in current_area.spaces if i.type == "VIEW_3D"]
-        space_view3d[0].shading.type = 'SOLID'
-        space_view3d[0].shading.show_object_outline = False
-        space_view3d[0].shading.show_specular_highlight = False
-        space_view3d[0].show_gizmo_navigate = False
-        space_view3d[0].use_local_camera = True
-        bpy.context.space_data.lock_camera = False#unlock camera to view
-
-        rig_ui_scale = 1.0
-
-        if rig_ui:
-            rig_ui_scale = rig_ui.scale[0]
-
-        units_scale = bpy.context.scene.unit_settings.scale_length
-        fac_ortho = 1.8# * (1/units_scale)
-
-        # Position the camera height to the backplate height
-        if ui_mesh:
-            vert_pos = [v.co for v in ui_mesh.data.vertices]
-            vert_pos = sorted(vert_pos, reverse=False, key=itemgetter(2))
-            max1 = ui_mesh.matrix_world @ vert_pos[0]
-            max2 = ui_mesh.matrix_world @ vert_pos[len(vert_pos)-1]
-            picker_size = (max1-max2).magnitude
-            picker_center = (max1+max2)/2
-            
-            # set the camera matrix            
-            pos_Z_world = rig.matrix_world.inverted() @ Vector((0.0, 0.0, picker_center[2]))
-            cam_ui.matrix_world = rig.matrix_world @ Matrix.Translation(Vector((0, -40, pos_Z_world[2])))
-            
-            cam_ui.scale = (1.0,1.0,1.0)
-            cam_ui.rotation_euler = (radians(90), 0, 0)
-
-            # set the camera clipping and ortho scale
-            bpy.context.evaluated_depsgraph_get().update()
-            dist = (cam_ui.matrix_world.to_translation() - picker_center).length
-            cam_ui.data.clip_start = dist*0.9
-            cam_ui.data.clip_end = dist*1.1
-            cam_ui.data.ortho_scale = fac_ortho * picker_size
-
-        #restore the scene camera
-        #bpy.context.scene.camera = current_cam
-
-    else:
-        self.report({'ERROR'}, 'No picker camera found for this rig')
-
-    #back to pose mode
-    bpy.ops.object.select_all(action='DESELECT')
-    rig.select_set(state=1)
-    bpy.context.view_layer.objects.active = rig
-    bpy.ops.object.mode_set(mode='POSE')
-
-    # enable the picker addon
-    try:
-        bpy.context.scene.Proxy_Picker.active = True
-    except:
-        pass
-
-
-def project_point_onto_plane(q, p, n):
-    n = n.normalized()
-    return q - ((q - p).dot(n)) * n
-
-
-def get_ik_pole_pos(b1, b2, dist):
-    plane_normal = (b1.head - b2.tail)
-    midpoint = (b1.head + b2.tail) * 0.5
-    prepole_dir = b2.head - midpoint
-    pole_pos = b2.head + prepole_dir.normalized()
-    pole_pos = project_point_onto_plane(pole_pos, b2.head, plane_normal)
-    pole_pos = b2.head + ((pole_pos - b2.head).normalized() * (b2.head - b1.head).magnitude * dist)
-    
-    return pole_pos
-
-
-def get_pose_matrix_in_other_space(mat, pose_bone):
-    rest = pose_bone.bone.matrix_local.copy()
-    rest_inv = rest.inverted()
-    par_mat = Matrix()
-    par_inv = Matrix()
-    par_rest = Matrix()
-    
-    # bone parent case
-    if pose_bone.parent and pose_bone.bone.use_inherit_rotation:
-        par_mat = pose_bone.parent.matrix.copy()
-        par_inv = par_mat.inverted()
-        par_rest = pose_bone.parent.bone.matrix_local.copy()
-    # bone parent as constraint case
-    elif len(pose_bone.constraints):
-        for cns in pose_bone.constraints:
-            if cns.type != 'ARMATURE':
-                continue
-            for tar in cns.targets:
-                if tar.subtarget != '':
-                    if tar.weight > 0.5:# not ideal, but take the bone as parent if influence is above average
-                        par_bone = get_pose_bone(tar.subtarget)
-                        par_mat = par_bone.matrix.copy()
-                        par_inv = par_mat.inverted()
-                        par_rest = par_bone.bone.matrix_local.copy()
-                        break
-
-    smat = rest_inv @ (par_rest @ (par_inv @ mat))
-
-    return smat
-
-
-def _snap_head(side):
-    c_head = get_pose_bone("c_head"+side)
-    head_scale_fix = get_pose_bone("head_scale_fix" + side)
-
-    # get the bone parent (constrained) of head_scale_fix
-    head_scale_fix_parent = None
-    for cns in head_scale_fix.constraints:
-        if cns.type == "CHILD_OF" and cns.influence == 1.0:
-            head_scale_fix_parent = get_pose_bone(cns.subtarget)
-
-    c_head_loc = c_head.location.copy()
-
-    # matrices evaluations
-    c_head_mat = c_head.matrix.copy()
-    head_scale_fix_mat = head_scale_fix_parent.matrix_channel.inverted() @ head_scale_fix.matrix_channel
-
-    # switch the prop
-    c_head["head_free"] = 0 if c_head["head_free"] == 1 else 1
-
-    # apply the matrices
-    # two time because of a dependency lag
-    for i in range(0,2):
-        update_transform()
-        c_head.matrix = head_scale_fix_mat.inverted() @ c_head_mat
-        # the location if offset, preserve it
-        c_head.location = c_head_loc
-
-    #insert keyframe if autokey enable
-    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
-        c_head.keyframe_insert(data_path='["head_free"]')
-
-
-def set_pos(pose_bone, mat):
-    if pose_bone.bone.use_local_location == True:
-        pose_bone.location = mat.to_translation()
-    else:
-        loc = mat.to_translation()
-
-        rest = pose_bone.bone.matrix_local.copy()
-        if pose_bone.bone.parent:
-            par_rest = pose_bone.bone.parent.matrix_local.copy()
-        else:
-            par_rest = Matrix()
-
-        q = (par_rest.inverted() @ rest).to_quaternion()
-        pose_bone.location = q @ loc
-
-
-def set_pose_rotation(pose_bone, mat):
-    q = mat.to_quaternion()
-
-    if pose_bone.rotation_mode == 'QUATERNION':
-        pose_bone.rotation_quaternion = q
-    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
-        pose_bone.rotation_axis_angle[0] = q.angle
-        pose_bone.rotation_axis_angle[1] = q.axis[0]
-        pose_bone.rotation_axis_angle[2] = q.axis[1]
-        pose_bone.rotation_axis_angle[3] = q.axis[2]
-    else:
-        pose_bone.rotation_euler = q.to_euler(pose_bone.rotation_mode)
-
-
-def snap_pos(pose_bone, target_bone):
-    # Snap a bone to another bone. Supports child of constraints and parent.
-    """
-    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
-    set_pos(pose_bone, mat)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='POSE')
-    """
-
-    # if the pose_bone has direct parent
-    if pose_bone.parent:
-        # apply double time because of dependecy lag
-        pose_bone.matrix = target_bone.matrix
-        #update hack
-        update_transform()
-        # second apply
-        pose_bone.matrix = target_bone.matrix
-    else:
-        # is there a child of constraint attached?
-        child_of_cns = None
-        if len(pose_bone.constraints) > 0:
-            all_child_of_cns = [i for i in pose_bone.constraints if i.type == "CHILD_OF" and i.influence == 1.0 and i.mute == False and i.target]
-            if len(all_child_of_cns) > 0:
-                child_of_cns = all_child_of_cns[0]# in case of multiple child of constraints enabled, use only the first for now
-
-        if child_of_cns != None:
-            if child_of_cns.subtarget != "" and get_pose_bone(child_of_cns.subtarget):
-                # apply double time because of dependecy lag
-                pose_bone.matrix = get_pose_bone(child_of_cns.subtarget).matrix_channel.inverted() @ target_bone.matrix
-                update_transform()
-                pose_bone.matrix = get_pose_bone(child_of_cns.subtarget).matrix_channel.inverted() @ target_bone.matrix
-            else:
-                pose_bone.matrix = target_bone.matrix
-
-        else:
-            pose_bone.matrix = target_bone.matrix
-
-            
-def update_transform():   
-    # hack to trigger the update with a blank rotation operator
-    bpy.ops.transform.rotate(value=0, orient_axis='Z', orient_type='VIEW', orient_matrix=((0.0, 0.0, 0), (0, 0.0, 0.0), (0.0, 0.0, 0.0)), orient_matrix_type='VIEW', mirror=False)
-
-    
-def get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole):
-    def signed_angle(vector_u, vector_v, normal):
-        normal = normal.normalized()
-        a = vector_u.angle(vector_v)
-        if vector_u.magnitude != 0.0 and vector_v.magnitude != 0.0 and normal.magnitude != 0.0:
-            if vector_u.cross(vector_v).magnitude != 0.0:      
-                if vector_u.cross(vector_v).angle(normal) < 1:
-                    a = -a
-        return a
-    
-    midpoint = (fk2.tail + fk1.head) / 2
-    vec1 = fk2.head - midpoint
-    vec2 = ik2.head - midpoint
-    pole_normal = (ik2.tail - ik1.head).cross(pole.head - ik1.head)
-    angle = signed_angle(vec1, vec2, pole_normal)
-    return angle
-    
-    
-def snap_pos_matrix(pose_bone, target_bone_matrix):
-    # Snap a bone to another bone. Supports child of constraints and parent.
-
-    # if the pose_bone has direct parent
-    if pose_bone.parent:       
-        pose_bone.matrix = target_bone_matrix.copy()        
-        update_transform()
-    else:
-        # is there a child of constraint attached?
-        child_of_cns = None
-        if len(pose_bone.constraints) > 0:
-            all_child_of_cns = [i for i in pose_bone.constraints if i.type == "CHILD_OF" and i.influence == 1.0 and i.mute == False and i.target]
-            if len(all_child_of_cns) > 0:
-                child_of_cns = all_child_of_cns[0]# in case of multiple child of constraints enabled, use only the first for now
-
-        if child_of_cns:
-            if child_of_cns.subtarget != "" and get_pose_bone(child_of_cns.subtarget):              
-                pose_bone.matrix = get_pose_bone(child_of_cns.subtarget).matrix_channel.inverted_safe() @ target_bone_matrix                
-                update_transform()
-            else:
-                pose_bone.matrix = target_bone_matrix.copy()
-        else:
-            pose_bone.matrix = target_bone_matrix.copy()
-
-
-def snap_rot(pose_bone, target_bone):
-    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
-    set_pose_rotation(pose_bone, mat)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='POSE')
-
-
-def set_inverse_child(b):
-    pbone = bpy.context.active_object.pose.bones[b]
-    context_copy = bpy.context.copy()
-    context_copy["constraint"] = pbone.constraints["Child Of"]
-    bpy.context.active_object.data.bones.active = pbone.bone
-    bpy.ops.constraint.childof_set_inverse(context_copy, constraint="Child Of", owner='BONE')
-
-
-def convert_rot_mode(self):
-    scn = bpy.context.scene
-    armature = bpy.context.active_object
-    rot_mode_tar = self.mode
-    current_frame = scn.frame_current
-    
-    def set_target_rot_mode(pb):
-        pb.rotation_mode = 'QUATERNION' if rot_mode_tar == 'rotation_quaternion' else self.euler_order
-        
-    def insert_keyframe(pb):
-        pb.keyframe_insert(data_path=rot_mode_tar)
-        # Todo, auto-keyframing the rot mode is not supported for now, it leads to rotation conversion update issue
-        # see if it can be fixed later
-        #if self.key_rot_mode:
-        #    pb.keyframe_insert(data_path='rotation_mode')
-
-
-    pose_bones = bpy.context.selected_pose_bones if self.selected_only else armature.pose.bones
-    
-    if len(pose_bones) == 0:
-        return
-        
-    for pb in pose_bones:
-        current_mode = pb.rotation_mode
-        pb_path = pb.path_from_id() 
-        fc_data_path = pb_path+'.rotation_quaternion' if current_mode == 'QUATERNION' else pb_path+'.rotation_euler'        
-        fc = armature.animation_data.action.fcurves.find(fc_data_path)       
-        
-        if fc == None and self.selected_only == False:# only animated bones, otherwise could insert keyframes on unwanted bones (rig mechanics)
-            continue
-                
-        keyf_to_del = []
-                
-        if self.one_key_per_frame:            
-                
-            for f in range(self.frame_start, self.frame_end +1):
-                scn.frame_set(f)
-                
-                for pb in pose_bones:
-                    current_mode = pb.rotation_mode
-                    
-                    # convert rot mode
-                    set_target_rot_mode(pb)                          
-                    
-                    # add keyframe
-                    insert_keyframe(pb)
-                    
-                    # restore rot mode for next keyframe
-                    if f != self.frame_end:
-                        pb.rotation_mode = current_mode
-        
-        else:# only convert existing keyframes     
-            if fc == None:
-                # no keyframes yet, convert rot mode
-                set_target_rot_mode(pb)
-                continue                
-            
-            for keyf in fc.keyframe_points:
-                if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
-                    scn.frame_set(int(keyf.co[0]))
-                    keyf_to_del.append(keyf.co[0])
-                    set_target_rot_mode(pb)        
-                    insert_keyframe(pb)                    
-                    
-                    # restore rot mode for next keyframe                    
-                    pb.rotation_mode = current_mode                    
-        
-                        
-        set_target_rot_mode(pb)
-        
-    # restore initial frame
-    scn.frame_set(current_frame)
-    
-    
+#   IK FK arms
 def bake_fk_to_ik_arm(self):
-    for f in range(self.frame_start, self.frame_end +1):
-        bpy.context.scene.frame_set(f)
-        #print("baking frame", f)
+    armature = bpy.context.active_object
+    
+    if self.one_key_per_frame:# bake all frames
+        for f in range(self.frame_start, self.frame_end +1):
+            bpy.context.scene.frame_set(f)      
+            fk_to_ik_arm(bpy.context.active_object, self.side)
+    
+    else:# bake only existing keyframes
+        # collect frames that have keyframes
+        arms_ik_ctrl = [ard.arm_bones_dict['shoulder']['control'], ard.arm_bones_dict['arm']['control_ik'],
+                        ard.arm_bones_dict['hand']['control_ik'], ard.arm_bones_dict['control_pole_ik']]        
+        frames_idx = []
+        
+        for base_name in arms_ik_ctrl:
+            bname = base_name+self.side
+            fc_start_dp = 'pose.bones["'+bname+'"].'
 
-        fk_to_ik_arm(bpy.context.active_object, self.side)
+            for fc in armature.animation_data.action.fcurves:
+                if fc.data_path.startswith(fc_start_dp):
+                    for keyf in fc.keyframe_points:
+                        if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
+                            if not keyf.co[0] in frames_idx:
+                                frames_idx.append(keyf.co[0])
+            
+            for f in frames_idx:
+                bpy.context.scene.frame_set(int(f))          
+                fk_to_ik_arm(armature, self.side)
 
 
 def fk_to_ik_arm(obj, side):
@@ -3027,11 +3105,34 @@ def fk_to_ik_arm(obj, side):
         
 
 def bake_ik_to_fk_arm(self):
-    for f in range(self.frame_start, self.frame_end +1):
-        bpy.context.scene.frame_set(f)
+    armature = bpy.context.active_object
+    
+    if self.one_key_per_frame:# bake all frames        
+        for f in range(self.frame_start, self.frame_end +1):
+            bpy.context.scene.frame_set(f)
+            ik_to_fk_arm(armature, self.side)
+            
+    else:# bake only existing keyframes
+        # collect frames that have keyframes
+        arms_fk_ctrl = [ard.arm_bones_dict['shoulder']['control'], ard.arm_bones_dict['arm']['control_fk'],
+                        ard.arm_bones_dict['forearm']['control_fk'], ard.arm_bones_dict['hand']['control_fk']]
+        frames_idx = []
+        
+        for base_name in arms_fk_ctrl:
+            bname = base_name+self.side
+            fc_start_dp = 'pose.bones["'+bname+'"].'
 
-        ik_to_fk_arm(bpy.context.active_object, self.side)
-
+            for fc in armature.animation_data.action.fcurves:
+                if fc.data_path.startswith(fc_start_dp):
+                    for keyf in fc.keyframe_points:
+                        if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
+                            if not keyf.co[0] in frames_idx:
+                                frames_idx.append(keyf.co[0])
+            
+            for f in frames_idx:
+                bpy.context.scene.frame_set(int(f))          
+                ik_to_fk_arm(armature, self.side)
+                
 
 def ik_to_fk_arm(obj, side):
     arm_fk  = obj.pose.bones[fk_arm[0] + side]
@@ -3139,12 +3240,40 @@ def ik_to_fk_arm(obj, side):
     update_transform()
 
 
+#   IK FK legs
 def bake_fk_to_ik_leg(self):
-    for f in range(self.frame_start, self.frame_end +1):
-        bpy.context.scene.frame_set(f)
-        #print("baking frame", f)
+    armature = bpy.context.active_object
+    
+    if self.one_key_per_frame:# bake all frames
+        for f in range(self.frame_start, self.frame_end +1):
+            bpy.context.scene.frame_set(f)
+            #print("baking frame", f)
+            fk_to_ik_leg(armature, self.side)
+        
+    else:# bake only existing keyframes
+        # collect frames that have keyframes
+        legs_ik_ctrl = [ard.leg_bones_dict['upthigh'], ard.leg_bones_dict['thigh']['control_ik'],
+                        ard.leg_bones_dict['foot']['control_ik'], ard.leg_bones_dict['foot']['control_reverse'],
+                        ard.leg_bones_dict['foot']['control_roll'], ard.leg_bones_dict['foot']['control_ik_offset'],
+                        ard.leg_bones_dict['toes']['control_ik'], ard.leg_bones_dict['toes']['control_pivot'],
+                        ard.leg_bones_dict['control_pole_ik']]
+        
+        frames_idx = []
+        
+        for base_name in legs_ik_ctrl:
+            bname = base_name+self.side
+            fc_start_dp = 'pose.bones["'+bname+'"].'
 
-        fk_to_ik_leg(bpy.context.active_object, self.side)
+            for fc in armature.animation_data.action.fcurves:
+                if fc.data_path.startswith(fc_start_dp):
+                    for keyf in fc.keyframe_points:
+                        if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
+                            if not keyf.co[0] in frames_idx:
+                                frames_idx.append(keyf.co[0])
+            
+            for f in frames_idx:
+                bpy.context.scene.frame_set(int(f))          
+                fk_to_ik_leg(armature, self.side)
 
 
 def fk_to_ik_leg(obj, side):
@@ -3240,12 +3369,35 @@ def fk_to_ik_leg(obj, side):
 
 
 def bake_ik_to_fk_leg(self):
-    for f in range(self.frame_start, self.frame_end +1):
-        bpy.context.scene.frame_set(f)
-        #print("baking frame", f)
+    armature = bpy.context.active_object    
+    
+    if self.one_key_per_frame:# bake all frames
+        for f in range(self.frame_start, self.frame_end +1):
+            bpy.context.scene.frame_set(f)
+            ik_to_fk_leg(armature, self.side)
+    
+    else:# bake only existing keyframes
+        # collect frames that have keyframes
+        legs_fk_ctrl = [ard.leg_bones_dict['upthigh'], ard.leg_bones_dict['thigh']['control_fk'], ard.leg_bones_dict['calf']['control_fk'],
+                        ard.leg_bones_dict['foot']['control_fk'], ard.leg_bones_dict['toes']['control_fk']]
+        
+        frames_idx = []
+        
+        for base_name in legs_fk_ctrl:
+            bname = base_name+self.side
+            fc_start_dp = 'pose.bones["'+bname+'"].'
 
-        ik_to_fk_leg(bpy.context.active_object, self.side)
-
+            for fc in armature.animation_data.action.fcurves:
+                if fc.data_path.startswith(fc_start_dp):
+                    for keyf in fc.keyframe_points:
+                        if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
+                            if not keyf.co[0] in frames_idx:
+                                frames_idx.append(keyf.co[0])
+            
+            for f in frames_idx:
+                bpy.context.scene.frame_set(int(f))          
+                ik_to_fk_leg(armature, self.side)
+    
 
 def ik_to_fk_leg(rig, side):
     thigh_fk = get_pose_bone(fk_leg[0] + side)
@@ -3401,6 +3553,52 @@ def ik_to_fk_leg(rig, side):
         foot_fk.bone.select = False        
 
 
+def get_ik_pole_pos(b1, b2, dist):
+    plane_normal = (b1.head - b2.tail)
+    midpoint = (b1.head + b2.tail) * 0.5
+    prepole_dir = b2.head - midpoint
+    pole_pos = b2.head + prepole_dir.normalized()
+    pole_pos = project_point_onto_plane(pole_pos, b2.head, plane_normal)
+    pole_pos = b2.head + ((pole_pos - b2.head).normalized() * (b2.head - b1.head).magnitude * dist)
+    
+    return pole_pos
+    
+        
+def compensate_ik_pole_position(fk1, fk2, ik1, ik2, pole):
+    angle_offset = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
+    i = 0
+    dir = 1
+    while (angle_offset > 0.005 and i < 6):
+        print('Correcting IK pole snap', i)
+        axis = (ik2.tail-ik1.head)
+        origin = (fk2.tail + fk1.head) / 2
+        pole_rotated = _rotate_point(pole.head, angle_offset*dir, axis, origin)        
+        snap_pos_matrix(pole, Matrix.Translation(pole_rotated))
+        new_angle = get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole)
+        if new_angle > angle_offset:# wrong direction!            
+            dir *= -1
+        angle_offset = new_angle
+        i += 1   
+        
+
+def get_ik_fk_angle_offset(fk1, fk2, ik1, ik2, pole):
+    def signed_angle(vector_u, vector_v, normal):
+        normal = normal.normalized()
+        a = vector_u.angle(vector_v)
+        if vector_u.magnitude != 0.0 and vector_v.magnitude != 0.0 and normal.magnitude != 0.0:
+            if vector_u.cross(vector_v).magnitude != 0.0:      
+                if vector_u.cross(vector_v).angle(normal) < 1:
+                    a = -a
+        return a
+    
+    midpoint = (fk2.tail + fk1.head) / 2
+    vec1 = fk2.head - midpoint
+    vec2 = ik2.head - midpoint
+    pole_normal = (ik2.tail - ik1.head).cross(pole.head - ik1.head)
+    angle = signed_angle(vec1, vec2, pole_normal)
+    return angle
+    
+    
 def _arp_snap_pole(ob, side, bone_type):
     pole = get_pose_bone('c_' + bone_type + '_pole' + side)
     
@@ -3440,229 +3638,650 @@ def _arp_snap_pole(ob, side, bone_type):
 
     else:
         print("No c_leg_pole found")
+       
+       
+#   IK FK Spline
+def fk_to_ik_spline(obj, spline_name, side):
+    c_spline_root = get_pose_bone('c_'+spline_name+'_root'+side)    
+    
+    #  collect indiv controllers    
+    c_fk_names = []
+    c_ik_names = []
+    
+    for i in range(1, 1024):
+        id = '%02d' % i
+        # get IK ctrl
+        c_ik_name = 'c_'+spline_name+'_'+id+side
+        c_ik_pb = get_pose_bone(c_ik_name)
+        if c_ik_pb:
+            c_ik_names.append(c_ik_name)
+            # get FK ctrl
+            c_fk_name = 'c_'+spline_name+'_fk_'+id+side
+            c_fk_pb = get_pose_bone(c_fk_name)
+            if c_fk_pb:
+                c_fk_names.append(c_fk_name)
+            else:
+                break            
+        else:
+            break  
 
-
-def get_active_child_of_cns(bone):
-    constraint = None
-    bparent_name = ""
-    parent_type = ""
-    valid_constraint = True
-
-    if len(bone.constraints) > 0:
-        for c in bone.constraints:
-            if not c.mute and c.influence > 0.5 and c.type == 'CHILD_OF':
-                if c.target:
-                    if c.target.type == 'ARMATURE':# bone
-                        bparent_name = c.subtarget
-                        parent_type = "bone"
-                        constraint = c
-                    else:# object
-                        bparent_name = c.target.name
-                        parent_type = "object"
-                        constraint = c
-
-    if constraint:
-        if parent_type == "bone":
-            if bparent_name == "":
-                valid_constraint = False
-
-    return constraint, bparent_name, parent_type, valid_constraint
-
-
-def ik_to_fk_finger(root_finger, side):
-    finger_type = None
-    rig = bpy.context.active_object
-
-    for i in fingers_type_list:
-        if i in root_finger.name:
-            finger_type = i
+    # collect def bones
+    def_names = []
+        
+    for i in range(1, 1024):
+        id = '%02d' % i        
+        def_name = spline_name+'_def_'+id+side
+        def_pb = get_pose_bone(def_name)
+        if def_pb:
+            def_names.append(def_name)        
+        else:
             break
-
-    ik_target_name = ""
-    ik_tip = root_finger["ik_tip"]
-
-    if ik_tip == 1:# ik1
-        ik_target_name = "c_"+finger_type+"_ik"+side
-    elif ik_tip == 0:# ik2
-        ik_target_name = "c_"+finger_type+"_ik2"+side
-
-    ik_target = get_pose_bone(ik_target_name)
-    if ik_target == None:
-        print("Finger IK target not found:", ik_target_name)
-        return
-
-    ik_pole_name = "c_"+finger_type+"_pole"+side
-    ik_pole = get_pose_bone(ik_pole_name)
-    if ik_pole == None:
-        print("Finger IK pole not found:", ik_pole_name)
-        return
-
-    hand_b = get_data_bone("hand_ref"+side)
-
-    fingers_ik_pole_distance = 1.0
-    if "fingers_ik_pole_distance" in hand_b.keys():
-        fingers_ik_pole_distance = hand_b["fingers_ik_pole_distance"]
-
-    # Snap IK target
-        # constraint support
-    constraint, bparent_name, parent_type, valid_constraint = get_active_child_of_cns(ik_target)
-
-    finger3_fk = get_pose_bone("c_"+finger_type+"3"+side)
-    if constraint and valid_constraint:
-        if parent_type == "bone":
-            bone_parent = get_pose_bone(bparent_name)
-            ik_target.matrix = bone_parent.matrix_channel.inverted() @ finger3_fk.matrix
-            update_transform()
-            if ik_tip == 1:
-                # set head to tail position
-                tail_mat = bone_parent.matrix_channel.inverted() @ Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
-                ik_target.matrix = tail_mat @ ik_target.matrix
-
-        if parent_type == "object":
-            obj = bpy.data.objects.get(bparent_name)
-            ik_target.matrix = constraint.inverse_matrix.inverted() @ obj.matrix_world.inverted() @ finger3_fk.matrix
-            update_transform()
-            if ik_tip == 1:
-                # set head to tail position
-                tail_mat = constraint.inverse_matrix.inverted() @ obj.matrix_world.inverted() @ Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
-                ik_target.matrix = tail_mat @ ik_target.matrix
-    else:
-        ik_target.matrix = finger3_fk.matrix
+    
+    # reset FK masters    
+    spline_ik_type = '1'
+    
+    for i in range(1, 1024):
+        id = '%02d' % i           
+        c_fk_name = 'c_'+spline_name+'_fk_master_'+id+side
+        c_fk_pb = get_pose_bone(c_fk_name)
+        if c_fk_pb:
+            zero_out_pb(c_fk_pb) 
+        else:
+            break
+            
+        # Spline IK type?
+        # look for IK masters. If none, this is a Spline IK type 1
+        if spline_ik_type == '1':
+            c_ik_name = 'c_'+spline_name+'_ik_master_'+id+side
+            c_ik_pb = get_pose_bone(c_ik_name)
+            if c_ik_pb:
+                spline_ik_type = '2'
+    
+    #   snap
+    for i, c_fk_name in enumerate(c_fk_names):
+        c_fk_pb = get_pose_bone(c_fk_name)
+        if i > len(c_ik_names)-1:
+            print('Missing Spline IK controller: index '+i)
+            continue
+            
+        if spline_ik_type == '2':
+            c_ik_pb = get_pose_bone(c_ik_names[i])
+            c_fk_pb.matrix = c_ik_pb.matrix.copy()
+        elif spline_ik_type == '1':# basic spline IK, need to copy from the deform chain for correct bones rotation
+            def_pb = get_pose_bone(def_names[i])
+            c_fk_pb.matrix = def_pb.matrix.copy()
+            
+        # stretch/scale not supported, set to 1
+        c_fk_pb.scale = [1,1,1]
         update_transform()
-        if ik_tip == 1:
-            # set head to tail position
-            tail_mat = Matrix.Translation((ik_target.y_axis.normalized() * ik_target.length))
-            ik_target.matrix = tail_mat @ ik_target.matrix
+    
+   
+    # switch
+    c_spline_root['ik_fk_switch'] = 1.0
 
-    update_transform()
+    # udpate hack  
+    bpy.context.view_layer.update()
 
-    # Snap IK pole
-    fk_fingers = ["c_"+finger_type+"1"+side, "c_"+finger_type+"2"+side, "c_"+finger_type+"3"+side]
-    ik_fingers = ["c_"+finger_type+"1_ik"+side, "c_"+finger_type+"2_ik"+side, "c_"+finger_type+"3_ik"+side]
-
-    if ik_tip == 0:# only the first two phalanges must be snapped if ik2, since the last is the IK target
-        fk_fingers.pop()
-        ik_fingers.pop()
-
-    phal2 = get_pose_bone(fk_fingers[1])
-        # constraint support
-    pole_cns, bpar_name, par_type, valid_cns = get_active_child_of_cns(ik_pole)
-
-    if pole_cns and valid_cns:
-        bone_parent = get_pose_bone(bpar_name)
-        ik_pole.matrix = bone_parent.matrix_channel.inverted() @ Matrix.Translation((phal2.z_axis.normalized() * phal2.length * 1.3 * fingers_ik_pole_distance)) @ phal2.matrix
-    else:
-        ik_pole.matrix = Matrix.Translation((phal2.z_axis.normalized() * phal2.length * 1.3 * fingers_ik_pole_distance)) @ phal2.matrix
-
-    ik_pole.rotation_euler = [0,0,0]
-
-    update_transform()
-
-        # phalanges
-    for iter in range(0,4):
-        for i, bname in enumerate(ik_fingers):
-            b_ik = get_pose_bone(bname)
-            loc, scale = b_ik.location.copy(), b_ik.scale.copy()
-            b_fk = get_pose_bone(fk_fingers[i])
-            b_ik.matrix = b_fk.matrix
-            # restore loc and scale, only rotation for better results
-            b_ik.location = loc
-            b_ik.scale = scale
-            # update hack
-            update_transform()
-
-     # Switch prop
-    root_finger['ik_fk_switch'] = 0.0
-
-    # udpate hack
-    update_transform()
-
-    #insert key if autokey enable
+    #insert key if autokey enable    
     if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
-        root_finger.keyframe_insert(data_path='["ik_fk_switch"]')
+        c_spline_root.keyframe_insert(data_path='["ik_fk_switch"]')
+        
+        for i, c_fk_name in enumerate(c_fk_names):
+            c_fk_pb = get_pose_bone(c_fk_name)
+            keyframe_pb_transforms(c_fk_pb, scale=False)
+            c_ik_pb = get_pose_bone(c_ik_name)
+            keyframe_pb_transforms(c_ik_pb, scale=False)
+    
+    # change IK to FK foot selection    
+    bpy.ops.pose.select_all(action='DESELECT')
+    c_fk_pb = get_pose_bone(c_fk_names[0])
+    c_fk_pb.bone.select = True
+    obj.data.bones.active = c_fk_pb.bone
 
-        for bname in ik_fingers + fk_fingers + [ik_target.name]:
-            pb = get_pose_bone(bname)
-            pb.keyframe_insert(data_path="location")
-            if pb.rotation_mode != "QUATERNION":
-                pb.keyframe_insert(data_path="rotation_euler")
-            else:
-                pb.keyframe_insert(data_path="rotation_quaternion")
+    
+def ik_to_fk_spline(obj, spline_name, side):
+    c_spline_root = get_pose_bone('c_'+spline_name+'_root'+side)
+
+    # collect masters
+    c_fk_master_names = []
+    c_ik_master_names = []
+    
+    spline_ik_type = '1'
+    
+    for i in range(1, 1024):
+        id = '%02d' % i
+        # get IK ctrl
+        c_ik_name = 'c_'+spline_name+'_master_'+id+side
+        c_ik_pb = get_pose_bone(c_ik_name)
+        if c_ik_pb:
+            c_ik_master_names.append(c_ik_name)
+            # get FK ctrl
+            c_fk_name = 'c_'+spline_name+'_fk_master_'+id+side
+            c_fk_pb = get_pose_bone(c_fk_name)
+            if c_fk_pb:
+                c_fk_master_names.append(c_fk_name) 
+
+            # Spline IK type?
+            # look for IK masters. If none, this is a Spline IK type 1
+            if spline_ik_type == '1':           
+                spline_ik_type = '2'
+                
+        else:
+            break
+    
+    if spline_ik_type == '2' and len(c_fk_master_names)+1 != len(c_ik_master_names):
+        print('IK and FK chains have different amount of master controllers, cannot snap')
+        c_spline_root['ik_fk_switch'] = 0.0
+        update_transform()
+        return
+    
+    # collect inters  
+    c_ik_inter_names = []
+    
+    for i in range(1, 1024):
+        id = '%02d' % i
+        # get IK ctrl
+        c_ik_name = 'c_'+spline_name+'_inter_'+id+side
+        c_ik_pb = get_pose_bone(c_ik_name)
+        if c_ik_pb:
+            c_ik_inter_names.append(c_ik_name)              
+        else:
+            break
             
-            for i, j in enumerate(pb.lock_scale):
-                if not j:
-                    pb.keyframe_insert(data_path="scale", index=i)
-          
-
-def fk_to_ik_finger(root_finger, side):
-    finger_type = None
-
-    for i in fingers_type_list:
-        if i in root_finger.name:
-            finger_type = i
+    # collect individual controllers
+    c_fk_names = []
+    c_ik_names = []
+    
+    for i in range(1, 1024):
+        id = '%02d' % i
+        # get IK ctrl
+        c_ik_name = 'c_'+spline_name+'_'+id+side
+        c_ik_pb = get_pose_bone(c_ik_name)
+        if c_ik_pb:
+            c_ik_names.append(c_ik_name)
+            # get FK ctrl
+            c_fk_name = 'c_'+spline_name+'_fk_'+id+side
+            c_fk_pb = get_pose_bone(c_fk_name)
+            if c_fk_pb:
+                c_fk_names.append(c_fk_name)
+            else:
+                break            
+        else:
             break
 
-    ik_target_name = "c_"+finger_type+"_ik"+side
-    ik_target = get_pose_bone(ik_target_name)
-    if ik_target == None:
-        print("Finger IK target not found:", ik_target_name)
+    # snap tip
+    if spline_ik_type == '2':
+        c_spline_tip_name = 'c_'+spline_name+'_tip'+side
+        c_spline_tip = get_pose_bone(c_spline_tip_name)
+        
+        if c_spline_tip:
+            c_fk_tip_pb = get_pose_bone(c_fk_names[len(c_fk_names)-1])
+            tail_mat = Matrix.Translation(c_fk_tip_pb.tail)
+            c_spline_tip.matrix = tail_mat
+
+    # snap masters
+    for i, c_ik_master_name in enumerate(c_ik_master_names):
+        c_ik_master_pb = get_pose_bone(c_ik_master_name) 
+        
+        if i == len(c_ik_master_names)-1:# last, use the tail of the FK ctrl bone
+            c_fk_tip_pb = get_pose_bone(c_fk_names[len(c_fk_names)-1])
+            tail_mat = Matrix.Translation(c_fk_tip_pb.tail)
+            c_ik_master_pb.matrix = tail_mat
+        else:
+            c_fk_master_name = c_fk_master_names[i]
+            c_fk_master_pb = get_pose_bone(c_fk_master_name)
+            c_ik_master_pb.matrix = c_fk_master_pb.matrix.copy()
+            
+        # rot and stretch/scale not supported, zero out
+        c_ik_master_pb.scale = [1,1,1]
+        c_ik_master_pb.rotation_euler = [0,0,0]
+        c_ik_master_pb.rotation_quaternion = [1,0,0,0]
+        update_transform()
+        
+    
+    # snap inters controllers
+    for i, c_inter_name in enumerate(c_ik_inter_names):
+        c_inter_pb = get_pose_bone(c_inter_name)  
+        if i > len(c_fk_names)-1:
+            continue
+        c_fk_name = c_fk_names[i]
+        c_fk_pb = get_pose_bone(c_fk_name)
+        
+        # disable inters constraints
+        cns_states = []
+        for cns in c_inter_pb.constraints:
+            cns_states.append(cns.enabled)
+            cns.enabled = False
+            
+        update_transform()
+        
+        # apply target matrix
+        c_inter_pb.matrix = c_fk_pb.matrix.copy()
+        update_transform()
+        mat_no_cns = c_inter_pb.matrix.copy()
+        
+        # enable constraints
+        for ci, cns in enumerate(c_inter_pb.constraints):
+            cns.enabled = cns_states[ci]
+        
+        update_transform()
+        
+        # compensate constraints offset
+        mat_cns = c_inter_pb.matrix.copy()
+        mat_diff = mat_cns.inverted() @ mat_no_cns
+        c_inter_pb.matrix = mat_no_cns @ mat_diff
+        
+        update_transform()
+        
+        # stretch/scale not supported, zero out
+        c_ik_master_pb.scale = [1,1,1]       
+        update_transform()
+   
+    
+    # Do not snap individual controllers 
+    # Offsetting the indiv. controllers position
+    # leads to to buggy behavior when manipulating the IK spline
+    '''
+    for i, c_ik_name in enumerate(c_ik_names):
+        c_ik_pb = get_pose_bone(c_ik_name)        
+        c_fk_name = c_fk_names[i]
+        c_fk_pb = get_pose_bone(c_fk_name)
+        
+        c_ik_pb.matrix = c_fk_pb.matrix.copy()
+            
+        # stretch/scale not supported, zero out
+        c_ik_master_pb.scale = [1,1,1]       
+        update_transform()
+    ''' 
+    
+    # zero out individual controllers
+    for i, c_ik_name in enumerate(c_ik_names):
+        c_ik_pb = get_pose_bone(c_ik_name)
+        zero_out_pb(c_ik_pb)
+
+
+    # if Spline type 1, need to snap the curvy and tip controller
+    if spline_ik_type == '1':
+        # tip
+        tip_name = 'c_'+spline_name+'_tip'+side
+        c_tip_pb = get_pose_bone(tip_name)
+        
+        #   get the tail of the last FK bone
+        c_fk_pb = get_pose_bone(c_fk_names[len(c_fk_names)-1])
+        tail_mat = Matrix.Translation(c_fk_pb.tail)
+        c_tip_pb.matrix = tail_mat
+        
+        update_transform()
+        
+        # curvy
+        curvy_name = 'c_'+spline_name+'_curvy'+side
+        c_curvy = get_pose_bone(curvy_name)
+        
+        # get the ctrl the most influenced by the curvy constraint
+        # not ideal, see if a better snap method can be found later?
+        max_inf = 0.0
+        mid_pb = None
+        
+        for c_ik_name in c_ik_names:
+            c_ik = get_pose_bone(c_ik_name)
+            for cns in c_ik.constraints:
+                if cns.type == 'COPY_TRANSFORMS':
+                    if cns.subtarget == curvy_name:
+                        if max_inf < cns.influence:
+                            max_inf = cns.influence
+                            mid_pb = c_ik
+                            
+        if mid_pb:
+            def get_name_idx(name):    
+                for i in name.split('_'):  
+                    i = i.split('.')[0]
+                    if i.isdigit() and len(i) == 2:            
+                        return int(i)  
+            
+            idx = get_name_idx(mid_pb.name)
+            s_idx = '%02d' % idx
+            c_fk_mid = get_pose_bone('c_'+spline_name+'_fk_'+s_idx+side)
+            
+            if c_fk_mid:
+                print('SNAP CURVY', c_curvy.name, c_fk_mid.name)
+                c_curvy.matrix = c_fk_mid.matrix.copy()
+        
+    update_transform()
+        
+    # switch
+    c_spline_root['ik_fk_switch'] = 0.0
+
+    # udpate hack  
+    bpy.context.view_layer.update()
+
+    #insert key if autokey enable    
+    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
+        c_spline_root.keyframe_insert(data_path='["ik_fk_switch"]')
+        
+        # FK indiv controllers
+        for c_fk_name in enumerate(c_fk_names):
+            c_fk_pb = get_pose_bone(c_fk_name)
+            keyframe_pb_transforms(c_fk_pb)
+        # FK masters
+        for c_fk_name in enumerate(c_fk_master_names):
+            c_fk_master_pb = get_pose_bone(c_fk_name)
+            keyframe_pb_transforms(c_fk_master_pb)
+        # IK masters
+        for c_ik_name in enumerate(c_ik_master_names):
+            c_ik_master_pb = get_pose_bone(c_ik_name)
+            keyframe_pb_transforms(c_ik_master_pb)
+        # IK inters
+        for c_ik_name in enumerate(c_ik_inter_names):
+            c_ik_inter_pb = get_pose_bone(c_ik_name)
+            keyframe_pb_transforms(c_ik_inter_pb)
+        # IK indiv
+        for c_ik_name in enumerate(c_ik_names):
+            c_ik_pb = get_pose_bone(c_ik_name)
+            keyframe_pb_transforms(c_ik_pb)
+            
+    # change IK to FK foot selection    
+    bpy.ops.pose.select_all(action='DESELECT')
+    c_ik_pb = get_pose_bone(c_ik_names[0])
+    c_ik_pb.bone.select = True
+    obj.data.bones.active = c_ik_pb.bone
+        
+       
+def _switch_snap_pin(side, type):
+    if type == "leg":
+        c_leg_stretch = get_pose_bone("c_stretch_leg"+side)
+        if c_leg_stretch == None:
+            print("No 'c_stretch_leg' bone found")
+            return
+
+        c_leg_pin = get_pose_bone("c_stretch_leg_pin"+side)
+        if c_leg_pin == None:
+            print("No 'c_leg_stretch_pin' bone found")
+            return
+
+        if c_leg_stretch["leg_pin"] == 0.0:
+            c_leg_pin.matrix = c_leg_stretch.matrix
+            c_leg_stretch["leg_pin"] = 1.0
+        else:
+            c_leg_stretch["leg_pin"] = 0.0
+            c_leg_stretch.matrix = c_leg_pin.matrix
+
+    if type == "arm":
+        c_arm_stretch = get_pose_bone("c_stretch_arm"+side)
+        if c_arm_stretch == None:
+            print("No 'c_stretch_arm' bone found")
+            return
+
+        c_arm_pin = get_pose_bone("c_stretch_arm_pin"+side)
+        if c_arm_pin == None:
+            print("No 'c_stretch_arm_pin' bone found")
+            return
+        
+        # NID, new ik elbow pin snapping
+        c_arm_pole = get_pose_bone("c_arms_pole"+side)
+        if c_arm_pole == None:
+            print("No 'c_arms_pole' bone found")
+            return
+        # NID END
+
+        if c_arm_stretch["elbow_pin"] == 0.0:
+            c_arm_pin.matrix = c_arm_stretch.matrix
+            c_arm_stretch["elbow_pin"] = 1.0
+        else:
+            c_arm_stretch["elbow_pin"] = 0.0
+            c_arm_stretch.matrix =  c_arm_pin.matrix
+            # NID, new ik elbow pin snapping
+            c_arm_pole.matrix =  c_arm_pin.matrix
+            # NID END
+
+
+def _snap_head(side):
+    c_head = get_pose_bone("c_head"+side)
+    head_scale_fix = get_pose_bone("head_scale_fix" + side)
+
+    # get the bone parent (constrained) of head_scale_fix
+    head_scale_fix_parent = None
+    for cns in head_scale_fix.constraints:
+        if cns.type == "CHILD_OF" and cns.influence == 1.0:
+            head_scale_fix_parent = get_pose_bone(cns.subtarget)
+
+    c_head_loc = c_head.location.copy()
+
+    # matrices evaluations
+    c_head_mat = c_head.matrix.copy()
+    head_scale_fix_mat = head_scale_fix_parent.matrix_channel.inverted() @ head_scale_fix.matrix_channel
+
+    # switch the prop
+    c_head["head_free"] = 0 if c_head["head_free"] == 1 else 1
+
+    # apply the matrices
+    # two time because of a dependency lag
+    for i in range(0,2):
+        update_transform()
+        c_head.matrix = head_scale_fix_mat.inverted() @ c_head_mat
+        # the location if offset, preserve it
+        c_head.location = c_head_loc
+
+    #insert keyframe if autokey enable
+    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
+        c_head.keyframe_insert(data_path='["head_free"]')
+        
+            
+def _set_picker_camera(self):
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    #save current scene camera
+    current_cam = bpy.context.scene.camera
+
+    rig = bpy.data.objects.get(bpy.context.active_object.name)
+    
+    bpy.ops.object.select_all(action='DESELECT')
+    
+    cam_ui = None
+    rig_ui = None
+    ui_mesh = None
+    char_name_text = None
+    
+    is_a_proxy = False
+    if 'proxy_collection' in dir(rig):# proxy support
+        if rig.proxy_collection:
+            is_a_proxy = True
+            children = rig.proxy_collection.instance_collection.all_objects
+    if not is_a_proxy:
+        children = rig.children
+
+    for child in children:
+        if child.type == 'CAMERA' and 'cam_ui' in child.name:
+            cam_ui = child
+        if child.type == 'EMPTY' and 'rig_ui' in child.name:
+            rig_ui = child
+            for _child in rig_ui.children:
+                if _child.type == 'MESH' and 'mesh' in _child.name:
+                    ui_mesh = _child
+
+    # if the picker is not there, escape
+    if rig_ui == None and is_proxy(rig) == False:
+        self.report({'INFO'}, 'No picker found, click "Add Picker" to add one.')
         return
 
-    # snap
-    fk_fingers = ["c_"+finger_type+"1"+side, "c_"+finger_type+"2"+side, "c_"+finger_type+"3"+side]
-    ik_fingers = ["c_"+finger_type+"1_ik"+side, "c_"+finger_type+"2_ik"+side, "c_"+finger_type+"3_ik"+side]
+    # ui cam not found, add one
+    active_obj_name = bpy.context.active_object.name
+    if not cam_ui:
+        bpy.ops.object.camera_add(align="VIEW", enter_editmode=False, location=(0, 0, 0), rotation=(0, 0, 0))
+        # set cam data
+        bpy.context.active_object.name = "cam_ui"
+        cam_ui = bpy.data.objects["cam_ui"]
+        cam_ui.data.type = "ORTHO"
+        cam_ui.data.display_size = 0.1
+        cam_ui.data.show_limits = False
+        cam_ui.data.show_passepartout = False
+        cam_ui.parent = bpy.data.objects[active_obj_name]
 
-    for i in range(0,2):
-        for i, name in enumerate(fk_fingers):
-            b_fk = get_pose_bone(name)
-            b_ik = get_pose_bone(ik_fingers[i])
-            b_fk.matrix = b_ik.matrix
+        # set collections
+        for col in bpy.data.objects[active_obj_name].users_collection:
+            try:
+                col.objects.link(cam_ui)
+            except:
+                pass
 
-            # udpate hack
-            update_transform()
+    set_active_object(active_obj_name)
 
-     #switch
-    root_finger['ik_fk_switch'] = 1.0
+    if cam_ui:
+        # lock the camera transforms
+        ##cam_ui.lock_location[0]=cam_ui.lock_location[1]=cam_ui.lock_location[2]=cam_ui.lock_rotation[0]=cam_ui.lock_rotation[1]=cam_ui.lock_rotation[2] = True
+        #cam_ui.select_set(state=1)
+        #bpy.context.view_layer.objects.active = cam_ui
+        #bpy.ops.view3d.object_as_camera()
+        
+        space_data = bpy.context.space_data
+        space_data.use_local_camera = True
+        space_data.camera = cam_ui
+        space_data.region_3d.view_perspective = "CAMERA"
 
-    # udpate hack
-    update_transform()
+        # set viewport display options
+        ##bpy.context.space_data.lock_camera_and_layers = False
+        space_data.overlay.show_relationship_lines = False
+        space_data.overlay.show_text = False
+        space_data.overlay.show_cursor = False
+        current_area = bpy.context.area
+        space_view3d = [i for i in current_area.spaces if i.type == "VIEW_3D"]
+        space_view3d[0].shading.type = 'SOLID'
+        space_view3d[0].shading.show_object_outline = False
+        space_view3d[0].shading.show_specular_highlight = False
+        space_view3d[0].show_gizmo_navigate = False
+        space_view3d[0].use_local_camera = True
+        bpy.context.space_data.lock_camera = False#unlock camera to view
 
-    #insert key if autokey enable
-    if bpy.context.scene.tool_settings.use_keyframe_insert_auto:
-        root_finger.keyframe_insert(data_path='["ik_fk_switch"]')
+        rig_ui_scale = 1.0
 
-        for bname in ik_fingers + fk_fingers + [ik_target.name]:
-            pb = get_pose_bone(bname)
-            pb.keyframe_insert(data_path="location")
-            if pb.rotation_mode != "QUATERNION":
-                pb.keyframe_insert(data_path="rotation_euler")
-            else:
-                pb.keyframe_insert(data_path="rotation_quaternion")
+        if rig_ui:
+            rig_ui_scale = rig_ui.scale[0]
+
+        units_scale = bpy.context.scene.unit_settings.scale_length
+        fac_ortho = 1.8# * (1/units_scale)
+
+        # Position the camera height to the backplate height
+        if ui_mesh:
+            vert_pos = [v.co for v in ui_mesh.data.vertices]
+            vert_pos = sorted(vert_pos, reverse=False, key=itemgetter(2))
+            max1 = ui_mesh.matrix_world @ vert_pos[0]
+            max2 = ui_mesh.matrix_world @ vert_pos[len(vert_pos)-1]
+            picker_size = (max1-max2).magnitude
+            picker_center = (max1+max2)/2
             
-            for i, j in enumerate(pb.lock_scale):
-                if not j:
-                    pb.keyframe_insert(data_path="scale", index=i) 
+            # set the camera matrix            
+            pos_Z_world = rig.matrix_world.inverted() @ Vector((0.0, 0.0, picker_center[2]))
+            cam_ui.matrix_world = rig.matrix_world @ Matrix.Translation(Vector((0, -40, pos_Z_world[2])))
+            
+            cam_ui.scale = (1.0,1.0,1.0)
+            cam_ui.rotation_euler = (radians(90), 0, 0)
+
+            # set the camera clipping and ortho scale
+            bpy.context.evaluated_depsgraph_get().update()
+            dist = (cam_ui.matrix_world.to_translation() - picker_center).length
+            cam_ui.data.clip_start = dist*0.9
+            cam_ui.data.clip_end = dist*1.1
+            cam_ui.data.ortho_scale = fac_ortho * picker_size
+
+        #restore the scene camera
+        #bpy.context.scene.camera = current_cam
+
+    else:
+        self.report({'ERROR'}, 'No picker camera found for this rig')
+
+    #back to pose mode
+    bpy.ops.object.select_all(action='DESELECT')
+    rig.select_set(state=1)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='POSE')
+
+    # enable the picker addon
+    try:
+        bpy.context.scene.Proxy_Picker.active = True
+    except:
+        pass
+
+    
+def convert_rot_mode(self):
+    scn = bpy.context.scene
+    armature = bpy.context.active_object
+    rot_mode_tar = self.mode
+    current_frame = scn.frame_current
+    
+    def set_target_rot_mode(pb):
+        pb.rotation_mode = 'QUATERNION' if rot_mode_tar == 'rotation_quaternion' else self.euler_order
+        
+    def insert_keyframe(pb):
+        pb.keyframe_insert(data_path=rot_mode_tar)
+        # Todo, auto-keyframing the rot mode is not supported for now, it leads to rotation conversion update issue
+        # see if it can be fixed later
+        #if self.key_rot_mode:
+        #    pb.keyframe_insert(data_path='rotation_mode')
 
 
-def get_data_bone(name):
-    return bpy.context.active_object.data.bones.get(name)
+    pose_bones = bpy.context.selected_pose_bones if self.selected_only else armature.pose.bones
     
-
-def get_pose_bone(name):
-    return bpy.context.active_object.pose.bones.get(name)
-    
-    
-def get_edit_bone(name):
-    return bpy.context.active_object.data.edit_bones.get(name)
+    if len(pose_bones) == 0:
+        return
+        
+    for pb in pose_bones:
+        current_mode = pb.rotation_mode
+        pb_path = pb.path_from_id() 
+        fc_data_path = pb_path+'.rotation_quaternion' if current_mode == 'QUATERNION' else pb_path+'.rotation_euler'        
+        fc = armature.animation_data.action.fcurves.find(fc_data_path)       
+        
+        if fc == None and self.selected_only == False:# only animated bones, otherwise could insert keyframes on unwanted bones (rig mechanics)
+            continue
+                
+        keyf_to_del = []
+                
+        if self.one_key_per_frame:            
+                
+            for f in range(self.frame_start, self.frame_end +1):
+                scn.frame_set(f)
+                
+                for pb in pose_bones:
+                    current_mode = pb.rotation_mode
+                    
+                    # convert rot mode
+                    set_target_rot_mode(pb)                          
+                    
+                    # add keyframe
+                    insert_keyframe(pb)
+                    
+                    # restore rot mode for next keyframe
+                    if f != self.frame_end:
+                        pb.rotation_mode = current_mode
+        
+        else:# only convert existing keyframes     
+            if fc == None:
+                # no keyframes yet, convert rot mode
+                set_target_rot_mode(pb)
+                continue                
+            
+            for keyf in fc.keyframe_points:
+                if keyf.co[0] >= self.frame_start and keyf.co[0] <= self.frame_end:
+                    scn.frame_set(int(keyf.co[0]))
+                    keyf_to_del.append(keyf.co[0])
+                    set_target_rot_mode(pb)
+                    insert_keyframe(pb)
+                    
+                    # restore rot mode for next keyframe                    
+                    pb.rotation_mode = current_mode                    
+        
+                        
+        set_target_rot_mode(pb)
+        
+    # restore initial frame
+    scn.frame_set(current_frame)
     
 
 def _toggle_multi(limb, id, key):
     bone_list = []
 
     if limb == 'arm':
-        bone_list = auto_rig_datas.arm_displayed + auto_rig_datas.fingers_displayed
+        bone_list = ard.arm_displayed + ard.fingers_displayed
     if limb == 'leg':
-        bone_list = auto_rig_datas.leg_control
+        bone_list = ard.leg_control
 
     if get_pose_bone('c_pos')[key] == 1:
         get_pose_bone('c_pos')[key] = 0
@@ -3678,55 +4297,7 @@ def _toggle_multi(limb, id, key):
                 current_bone.hide = False   
 
 
-def is_selected(names, selected_bone_name, startswith=False):
-    bone_side = get_bone_side(selected_bone_name)
-    if startswith == False:
-        if type(names) == list:
-            for name in names:
-                if not "." in name[-2:]:
-                    if name + bone_side == selected_bone_name:
-                        return True
-                else:
-                    if name[-2:] == ".x":
-                        if name[:-2] + bone_side == selected_bone_name:
-                            return True
-        elif names == selected_bone_name:
-            return True
-    else:#startswith
-        if type(names) == list:
-            for name in names:
-                if selected_bone_name.startswith(name):
-                    return True
-        else:
-            return selected_bone_name.startswith(names)
-    return False
 
-
-def is_selected_prop(pbone, prop_name):
-    if pbone.bone.keys():
-        if prop_name in pbone.bone.keys():
-            return True
-
-
-def _add_layer_set(self):
-    rig = bpy.context.active_object
-    
-    new_set = rig.layers_sets.add()
-    new_set.name = 'LayerSet'    
-
-    rig.layers_sets_idx = len(rig.layers_sets)-1    
-
-        
-def _remove_layer_set(self):
-    rig = bpy.context.active_object
-    
-    rig.layers_sets.remove(rig.layers_sets_idx)
-    
-    if rig.layers_sets_idx > len(rig.layers_sets)-1:
-        rig.layers_sets_idx = len(rig.layers_sets)-1
-    
-    
-    
 # Rig UI Panels ##################################################################################################################
 class ArpRigToolsPanel:
     bl_space_type = 'VIEW_3D'
@@ -3825,7 +4396,6 @@ class ARP_PT_BoneCustomProps(Panel, ArpRigToolsPanel):
                 btn.prop = prop_name
         
 
- 
 class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
     bl_label = "Settings"
     bl_parent_id = "ARP_PT_RigProps"
@@ -4014,16 +4584,16 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
                 btn.state = "FK"
                 btn.side = bone_side
 
-                col = layout.column(align=True)
-                col.operator(ARP_OT_switch_snap_root_tip.bl_idname, text="Snap Root-Tip")
-                col.prop(finger_root, '["ik_tip"]', text="IK Root-Tip", slider=True)
-                row = col.row(align=True).split(factor=0.7, align=True)
-                btn = row.operator(ARP_OT_switch_snap_root_tip_all.bl_idname, text="Snap All to Root")
-                btn.state = "ROOT"
-                btn.side = bone_side
-                btn = row.operator(ARP_OT_switch_snap_root_tip_all.bl_idname, text="Tip")
-                btn.state = "TIP"
-                btn.side = bone_side
+                #col = layout.column(align=True)
+                #col.operator(ARP_OT_switch_snap_root_tip.bl_idname, text="Snap Root-Tip")
+                #col.prop(finger_root, '["ik_tip"]', text="IK Root-Tip", slider=True)
+                #row = col.row(align=True).split(factor=0.7, align=True)
+                #btn = row.operator(ARP_OT_switch_snap_root_tip_all.bl_idname, text="Snap All to Root")
+                #btn.state = "ROOT"
+                #btn.side = bone_side
+                #btn = row.operator(ARP_OT_switch_snap_root_tip_all.bl_idname, text="Tip")
+                #btn.state = "TIP"
+                #btn.side = bone_side
 
                 col.separator()
 
@@ -4037,8 +4607,8 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
 
         # Fingers Grasp
         if is_selected(hands_ctrl, selected_bone_name):
-            if 'fingers_grasp' in get_pose_bone("c_hand_fk" + bone_side).keys():#if property exists, retro-compatibility check
-                layout.label(text="Fingers:")
+            if 'fingers_grasp' in get_pose_bone('c_hand_fk'+bone_side).keys():#if property exists, retro-compatibility check
+                layout.label(text='Fingers:')
                 layout.prop(get_pose_bone("c_hand_fk" + bone_side),  '["fingers_grasp"]', text = "Fingers Grasp", slider = False)
 
 
@@ -4102,20 +4672,29 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
                     layout.prop(get_pose_bone("c_jawbone"+bone_side), '["lips_sticky_follow"]', text='Lips Follow', slider=True)
 
         # Spline IK
-        if is_selected("c_spline_", selected_bone_name, startswith=True) or is_selected_prop(active_bone, "arp_spline"):
-            layout.label(text="Spline IK")
+        if is_selected('c_spline_', selected_bone_name, startswith=True) or is_selected_prop(active_bone, 'arp_spline'):
+        
+            layout.label(text='Spline IK')
             spline_name = selected_bone_name.split('_')[1]
-            if active_bone.bone.keys() and "arp_spline" in active_bone.bone.keys():
+            if active_bone.bone.keys() and 'arp_spline' in active_bone.bone.keys():
                 spline_name = active_bone.bone['arp_spline']
-
-            if len(active_bone.keys()):
-                if "twist" in active_bone.keys():
-                    layout.prop(active_bone, '["twist"]', text="Twist")
-
-            spline_root = get_pose_bone("c_" + spline_name + "_root" + bone_side)
+                
+            spline_root = get_pose_bone('c_'+spline_name+'_root'+bone_side)
 
             if spline_root:
-                str = "None"
+                if 'ik_fk_switch' in spline_root.keys():
+                    col = layout.column(align=True)
+                    op = col.operator('pose.arp_switch_snap', text='Snap IK-FK')
+                    op.spline_name = spline_name
+                    col.prop(spline_root, '["ik_fk_switch"]', text='IK-FK Switch', slider=True)
+                    
+            if len(active_bone.keys()):
+                if 'twist' in active_bone.keys():
+                    layout.prop(active_bone, '["twist"]', text="Twist")
+                    
+            if spline_root:
+                
+                str = 'None'
                 if spline_root["y_scale"] == 1:
                     str = "Fit Curve"
                 elif spline_root["y_scale"] == 2:
@@ -4135,7 +4714,21 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
 
                 layout.prop(spline_root, '["volume_variation"]', text = 'Volume Variation')
 
-
+        # Kilt
+        if is_selected_prop(active_bone, 'arp_kilt'):
+            if 'kilt_name' in active_bone.bone.keys(): 
+                kilt_name = active_bone.bone['kilt_name']
+                kilt_master = get_pose_bone('c_'+kilt_name+'_master'+bone_side[:-2]+'.x')
+                
+                if kilt_master:
+                    layout.label(text="Kilt")           
+                    layout.prop(kilt_master, '["collide"]', text='Collide')
+                    layout.prop(kilt_master, '["collide_dist"]', text='Collide Distance')
+                    layout.prop(kilt_master, '["collide_dist_falloff"]', text='Collide Falloff')
+                    layout.prop(kilt_master, '["collide_spread"]', text='Collide Spread')
+        
+        
+        
         # Child Of switcher        
         col = layout.column(align=True)
         col.separator()
@@ -4173,7 +4766,6 @@ class ARP_PT_RigProps_Settings(Panel, ArpRigToolsPanel):
                 layout.label(text='No Multiple Limbs')     
 
                           
-         
 class ARP_PT_RigProps_SetPickerCam(Panel, ArpRigToolsPanel):
     bl_label = "Picker"
     bl_parent_id = "ARP_PT_RigProps"   
@@ -4211,18 +4803,17 @@ class ARP_PT_RigProps_Utils(Panel, ArpRigToolsPanel):
         
            
 
-
 ###########  REGISTER  ##################
 classes = (ARP_PT_RigProps, ARP_PT_RigProps_LayerSets, ARP_PT_BoneCustomProps, ARP_PT_RigProps_Settings, ARP_PT_RigProps_SetPickerCam,
         ARP_PT_RigProps_Utils, ARP_OT_snap_head, ARP_OT_set_picker_camera_func, ARP_OT_toggle_multi, ARP_OT_arp_snap_pole, 
         ARP_OT_arm_bake_fk_to_ik, ARP_OT_arm_fk_to_ik, ARP_OT_arm_bake_ik_to_fk, ARP_OT_arm_ik_to_fk, ARP_OT_switch_snap, 
         ARP_OT_leg_fk_to_ik, ARP_OT_leg_bake_fk_to_ik,  ARP_OT_leg_ik_to_fk, ARP_OT_leg_bake_ik_to_fk, ARP_OT_snap_pin, 
-        ARP_OT_reset_script, ARP_OT_toggle_layers, ARP_OT_free_parent_ik_fingers, ARP_OT_switch_all_fingers, ARP_OT_switch_snap_root_tip, 
-        ARP_OT_switch_snap_root_tip_all, 
-        ARP_UL_layers_sets_list, ObjectSet, LayerSet, 
+        ARP_OT_reset_script, ARP_OT_free_parent_ik_fingers, ARP_OT_switch_all_fingers, 
+        ARP_UL_layers_sets_list, BoneCollectionSet, ObjectSet, LayerSet, 
         ARP_OT_layers_sets_add, ARP_OT_layers_sets_remove, ARP_OT_layers_sets_move, ARP_MT_layers_sets_menu, ARP_MT_layers_sets_menu_import, 
         ARP_MT_layers_sets_menu_export, ARP_OT_layers_set_import, ARP_OT_layers_set_import_preset, ARP_OT_layers_set_export, ARP_OT_layers_set_export_preset, 
         ARP_OT_layers_sets_all_toggle, ARP_OT_layers_add_defaults, ARP_PT_layers_sets_edit, ARP_OT_layers_sets_add_object, 
+        ARP_OT_layers_sets_add_collection, ARP_OT_layers_sets_remove_collection,
         ARP_OT_layers_sets_clear_objects, ARP_OT_layers_sets_add_bones, ARP_OT_layers_sets_remove_bones, 
         ARP_OT_rotation_mode_convert, ARP_OT_property_pin, ARP_OT_childof_switcher, ARP_OT_childof_keyer)
 
@@ -4302,14 +4893,17 @@ def unregister():
             pass
         
     bpy.app.handlers.frame_change_post.remove(rig_layers_anim_update) 
-
-    del bpy.types.Object.layers_sets
-    del bpy.types.Object.layers_sets_idx
-    del bpy.types.Scene.show_ik_fk_advanced
-    del bpy.types.Scene.show_snap_child_advanced
-    del bpy.types.Scene.arp_layers_set_render
-    del bpy.types.Scene.arp_layers_show_exclu
-    del bpy.types.Scene.arp_layers_show_select    
-    del bpy.types.Scene.arp_layers_animated    
+    
+    try:# errors when rig_tools and arp are installed together
+        del bpy.types.Object.layers_sets
+        del bpy.types.Object.layers_sets_idx
+        del bpy.types.Scene.show_ik_fk_advanced
+        del bpy.types.Scene.show_snap_child_advanced
+        del bpy.types.Scene.arp_layers_set_render
+        del bpy.types.Scene.arp_layers_show_exclu
+        del bpy.types.Scene.arp_layers_show_select    
+        del bpy.types.Scene.arp_layers_animated
+    except:
+        pass
     
     

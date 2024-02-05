@@ -45,19 +45,22 @@ def reset_all_controllers():
         bpy.context.active_object
     except:
         return
-        
-    #save display layers
-    saved_layers = [layer_bool for layer_bool in bpy.context.active_object.data.layers]
 
-
-    #display layer 8 for neck child of reset
-    disp_layer = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,22,23,24,25,26,27,28,29,30,31]
-    for idx in disp_layer:
-        bpy.context.active_object.data.layers[idx] = True
+    # display all collections
+    layers_select = None
+    if bpy.app.version >= (4,0,0):
+        layers_select = {}        
+        for col in bpy.context.active_object.data.collections:
+            layers_select[col.name] = col.is_visible
+            col.is_visible = True
+    else:
+        layers_select = [layer_bool for layer_bool in bpy.context.active_object.data.layers]
+        for i in range(0, 32):
+            bpy.context.active_object.data.layers[i] = True
         
     bones_data = bpy.context.active_object.data.bones
 
-    # Reset Properties
+    # reset properties
     for bone in bpy.context.object.pose.bones:
         bone_parent = ""
         try:
@@ -103,9 +106,17 @@ def reset_all_controllers():
             except:
                 pass
               
-    #hide layers
-    for i, layer_bool in enumerate(saved_layers):
-        bpy.context.active_object.data.layers[i] = layer_bool
+    # restore collections
+    if bpy.app.version >= (4,0,0):
+        for col_name in layers_select:
+            bpy.context.active_object.data.collections.get(col_name).is_visible = layers_select[col_name]            
+    else:
+        # must enabling at least one
+        bpy.context.active_object.data.layers[layers_select[0]] = True
+        # restore the armature layers visibility
+        for i in range(0, 32):
+            bpy.context.active_object.data.layers[i] = layers_select[i]
+            
 
     bpy.ops.pose.select_all(action='DESELECT')
     

@@ -1,6 +1,7 @@
 import bpy, os
 from .bone_edit import *
 from .context import *
+from .armature import *
 
 
 def get_object_boundaries(obj):    
@@ -10,7 +11,6 @@ def get_object_boundaries(obj):
         vec = Vector((coord[0], coord[1], coord[2]))       
         global_coord = obj.matrix_world @ vec
         bound_box_world.append(global_coord)
-
     
     front = 1000000000
     back = -front
@@ -35,7 +35,6 @@ def get_object_boundaries(obj):
             bottom = coord[2]
       
     return {'front':front, 'back':back, 'left':left, 'right':right, 'top':top, 'bottom':bottom}
- 
 
 
 def append_from_arp(nodes=None, type=None):
@@ -83,7 +82,7 @@ def append_from_arp(nodes=None, type=None):
                         bpy.data.materials.remove(bpy.data.materials[mat_name], do_unlink=True)
 
                 # If we append a custom shape
-                if "cs_" in obj.name or "c_sphere" in obj.name:
+                if obj.name.startswith('cs_') or "c_sphere" in obj.name:
                     cs_grp = bpy.data.objects.get("cs_grp")
                     if cs_grp:
                         # parent the custom shape
@@ -110,7 +109,7 @@ def append_from_arp(nodes=None, type=None):
                 # find added/useless custom shapes and delete them
                 else:
                     for obj in bpy.data.objects:
-                        if obj.name[:3] == "cs_":
+                        if obj.name.startswith('cs_'):
                             if not obj.name in cs_objects:
                                 bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -209,13 +208,24 @@ def unhide_object(obj_to_set):
         print("Could not reveal object:", obj_to_set.name)
 
 
-def duplicate_object(new_name=""):
-    try:
-        bpy.ops.object.duplicate(linked=False, mode='TRANSLATION')
-    except:
-        bpy.ops.object.duplicate('TRANSLATION', False)
-    if new_name != "":
-        bpy.context.active_object.name = new_name
+def duplicate_object(new_name="", method='operator', obj=None):
+    if method == 'operator':
+        try:
+            bpy.ops.object.duplicate(linked=False, mode='TRANSLATION')
+        except:
+            bpy.ops.object.duplicate('TRANSLATION', False)
+        if new_name != "":
+            bpy.context.active_object.name = new_name
+    elif method == 'data':        
+        if obj:
+            obj_dupli = obj.copy()
+            for col in obj.users_collection:
+                col.objects.link(obj_dupli)
+            obj_dupli.data = obj_dupli.data.copy()
+            obj_dupli.name = new_name
+            return obj_dupli
+        else:
+            print('Cannot duplicate object, not found')
 
 
 def delete_children(passed_node, type):
@@ -262,11 +272,7 @@ def delete_children(passed_node, type):
             if bpy.context.active_object.data.edit_bones.get(passed_node.name):
 
                 # Save displayed layers
-                _layers = [bpy.context.active_object.data.layers[i] for i in range(0, 32)]
-
-                # Display all layers
-                for i in range(0, 32):
-                    bpy.context.active_object.data.layers[i] = True
+                _layers = enable_all_armature_layers()
 
                 bpy.ops.armature.select_all(action='DESELECT')
                 bpy.context.evaluated_depsgraph_get().update()
@@ -274,8 +280,7 @@ def delete_children(passed_node, type):
                 bpy.ops.armature.select_similar(type='CHILDREN')
                 bpy.ops.armature.delete()
 
-                for i in range(0, 32):
-                    bpy.context.active_object.data.layers[i] = _layers[i]
+                restore_armature_layers(_layers)
 
             # restore saved mode
             restore_current_mode(current_mode)
@@ -290,3 +295,33 @@ def parent_objects(_obj_list, target, mesh_only=True):
         obj_mat = obj.matrix_world.copy()
         obj.parent = target
         obj.matrix_world = obj_mat
+        
+        
+def select_children(obname, ob_type=None):
+    _ob = bpy.data.objects.get(obname)
+    for child in _ob.children:
+        if ob_type:
+            if ob_type != child.type:
+                continue
+        set_active_object(child.name)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        if len(child.children):
+            select_children(child.name)
+            
+def get_children(obname, ob_type=None):
+    children_list = []
+    children_list = get_children_recursive(obname, obtype=ob_type, list=children_list)
+    return children_list
+    
+    
+def get_children_recursive(obname, obtype=None, list=None):
+    _ob = get_object(obname)
+    if _ob.children:
+        for child in _ob.children:
+            if obtype:
+                if obtype != child.type:
+                    continue
+            list.append(child.name)            
+            get_children_recursive(child.name, obtype=obtype, list=list)
+
+    return list

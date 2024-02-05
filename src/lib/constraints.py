@@ -4,6 +4,13 @@ from mathutils import *
 from math import *
 
 
+def enable_constraint(cns, value):
+    if bpy.app.version >= (3,0,0):
+        cns.enabled = value
+    else:
+        cns.mute = not value     
+        
+        
 def set_constraint_inverse_matrix(cns):
     # set the inverse matrix of Child Of constraint
     subtarget_pbone = get_pose_bone(cns.subtarget)
@@ -11,7 +18,7 @@ def set_constraint_inverse_matrix(cns):
         cns.inverse_matrix = subtarget_pbone.bone.matrix_local.to_4x4().inverted()
 
 
-def add_copy_transf(p_bone, tar=None, subtar="", h_t=0.0, no_scale=False):
+def add_copy_transf(p_bone, tar=None, subtar='', h_t=0.0, no_scale=False):
     if tar == None:
         tar = bpy.context.active_object
 
@@ -45,16 +52,23 @@ def get_constraint_index(pb, cns):
 
         
 def move_constraint(pbone, cns, dir, repeat):
-    # must be in pose mode
-    
-    # the bone layer must be enabled
-    enabled_layers = []
+    # must be in pose mode    
     armature = bpy.context.active_object
-
-    for i, lay in enumerate(pbone.bone.layers):
-        if lay and armature.data.layers[i] == False:
-            armature.data.layers[i] = True
-            enabled_layers.append(i)
+    
+    # the bone layer must be visible
+    enabled_layers = []    
+    
+    if bpy.app.version >= (4,0,0):
+        for collec in armature.data.collections:
+            if is_bone_in_layer(pbone.name, collec.name):
+                if collec.is_visible == False:
+                    collec.is_visible = True
+                    enabled_layers.append(collec.name)
+    else:
+        for i, lay in enumerate(pbone.bone.layers):
+            if lay and armature.data.layers[i] == False:
+                armature.data.layers[i] = True
+                enabled_layers.append(i)
  
     # move
     if bpy.app.version >= (2, 81, 16):        
@@ -79,4 +93,7 @@ def move_constraint(pbone, cns, dir, repeat):
 
     # restore layers
     for idx in enabled_layers:
-        armature.data.layers[idx] = False
+        if bpy.app.version >= (4,0,0):
+            armature.data.collections.get(idx).is_visible = False
+        else:
+            armature.data.layers[idx] = False

@@ -96,6 +96,16 @@ class ARP_OT_export_fbx_wrap(bpy.types.Operator, ExportHelper):
                         "(WARNING! experimental option, use at own risks, known broken with armatures/animations)",
             default=False,
             )
+            
+    colors_type: EnumProperty(
+            name="Vertex Colors",
+            items=(('NONE', "None", "Do not import color attributes"),
+                   ('SRGB', "sRGB", "Expect file colors in sRGB color space"),
+                   ('LINEAR', "Linear", "Expect file colors in linear color space"),
+                   ),
+            description="Import vertex color attributes",
+            default='SRGB',
+            )
 
     object_types: EnumProperty(
             name="Object Types",

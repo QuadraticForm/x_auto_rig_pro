@@ -2,6 +2,8 @@ import bpy
 from math import *
 from mathutils import *
 from .maths_geo import *
+from .collections import *
+from .. import auto_rig_datas as ard
 
 
 def is_deforming(bone):
@@ -77,15 +79,6 @@ def rotate_edit_bone(edit_bone, angle_radian, axis):
     edit_bone.tail += offset_vec
     # preserve roll
     align_bone_x_axis(edit_bone, new_x_axis)
-
-
-def set_bone_layer(editbone, layer_idx, multi=False):
-    editbone.layers[layer_idx] = True
-    if multi:
-        return
-    for i, lay in enumerate(editbone.layers):
-        if i != layer_idx:
-            editbone.layers[i] = False
 
 
 def create_edit_bone(bone_name, deform=False):

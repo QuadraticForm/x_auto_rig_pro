@@ -1,5 +1,8 @@
 import bpy
 import addon_utils                  
+from .. import auto_rig_datas as ard
+from .collections import *
+from .armature import *
 
 class ARP_blender_version:
     _string = bpy.app.version_string
@@ -60,7 +63,82 @@ def convert_drivers_cs_to_xyz(armature):
     # tag in prop
     armature.data["arp_updated_3.0"] = True
     print("Converted custom shape scale drivers to xyz")
+    
+    
+def convert_armature_layers_to_collection(armature):
+    # convert old armature layers and bone colors groups
+    # from pre Blender 4.0 versions, to collections
+    
+    for col in armature.data.collections:
+        # remove deprecated bones color groups
+        if col.name in ard.bones_groups_to_remove:
+            armature.data.collections.remove(col)
+            continue
+        # rename color collections
+        if col.name in ard.bones_groups:
+            col.name = 'color_'+col.name
+        
+    # rename bones collections
+    print('Rename collections...')   
+    
+    for i, col in enumerate(armature.data.collections):
+        if col.name.startswith('Layer '):
+            lidx = int(col.name.split(' ')[1])-1
+            
+            # special case, both kilt bones and feather bones are in layer 24
+            # Split in two dedicated collections
+            if lidx == 24:
+                for bone in armature.data.bones:
+                    if is_bone_in_layer(bone.name, col.name):
+                        if 'arp_kilt' in bone.keys():
+                            set_bone_layer(bone, 'mch_kilt_masters')
+                        if 'feather' in bone.name:
+                            set_bone_layer(bone, 'mch_feathers')
+                   
+                # remove layer 24
+                # in case other unexpected bones remain in layer 24, move them out first
+                for bone in armature.data.bones:
+                    if is_bone_in_layer(bone.name, col.name):
+                        set_bone_layer(bone, 'Misc')
+                continue
+                
+            for col_name in ard.layer_col_map:
+                if ard.layer_col_map[col_name] == lidx:
+                    col.name = col_name
+                    break
+                    
+    # remove remaining Layer 24 if any
+    col_24 = armature.data.collections.get('Layer 25')
+    if col_24:
+        armature.data.collections.remove(col_24)
 
+    # ensure all ARP collections are created
+    for col_name in ard.layer_col_map:
+        if col_name[0].isupper():# only main collections with capital letters                
+            if armature.data.collections.get(col_name) == None:
+                print('Create collection', col_name)
+                armature.data.collections.new(col_name)
+            
+    sort_armature_collections(armature)    
+    
+    # update tag as prop
+    armature.data["arp_updated_4.0"] = True
+
+def convert_picker_layers_to_collection(armature):
+    converted = False
+    for pb in armature.pose.bones:
+        if 'layer' in pb.keys() and not 'collec' in pb.keys():
+            layer_idx = pb['layer']
+            layer_name = None
+            
+            for col_name in ard.layer_col_map:
+                if ard.layer_col_map[col_name] == layer_idx:
+                    layer_name = col_name
+                    break
+            pb['collec'] = col_name
+            converted = True
+    return converted
+    
 
 def is_fc_bb_param(fc, param):    
     # is the fcurve a bendy-bones parameter?
@@ -139,11 +217,13 @@ def get_bbone_param_name(setting):
 
 
 def check_id_root(action):    
-    if bpy.app.version >= (2,90,1):
-        if getattr(action, "id_root", None) == "OBJECT":
+    if bpy.app.version >= (2,90,1):        
+        if getattr(action, 'id_root', None) == 'OBJECT':
             return True
-        else:
+        elif getattr(action, 'id_root', None) == 'KEY':# shape keys actions are not exportable armature actions in that case
             return False
+        else:# sometimes, no tag, not sure why. Keep it then
+            return True
     else:
         return True
         
@@ -174,11 +254,19 @@ def invert_angle_with_blender_versions(angle=None, bone=False, axis=None):
     if invert:
         angle = -angle
 
-    return angle
-    
-def enable_constraint(cns, value):
-    if bpy.app.version >= (3,0,0):
-        cns.enabled = value
-    else:
-        cns.mute = not value
+    return angle    
+
+          
+def disable_bone_inherit_scale(editbone):
+    if bpy.app.version >= (2,81,0):
+        editbone.inherit_scale = 'NONE'
+    else:# backward-compatibility
+        editbone.use_inherit_scale = False
+        
+def enable_bone_inherit_scale(editbone):
+    if bpy.app.version >= (2,81,0):
+        editbone.inherit_scale = 'FULL'
+    else:# backward-compatibility
+        editbone.use_inherit_scale = True
+        
         

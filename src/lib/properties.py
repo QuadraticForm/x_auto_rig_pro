@@ -61,3 +61,7 @@ def create_custom_prop(node=None, prop_name="", prop_val=1.0, prop_min=0.0, prop
     # set as overridable
     node.property_overridable_library_set('["'+prop_name+'"]', True)
 
+def is_rna_prop(prop_name):
+    if prop_name in ['bl_rna', 'rna_type'] or prop_name.startswith('__'):
+        return True
+    return False

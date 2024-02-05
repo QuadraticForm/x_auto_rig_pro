@@ -1,5 +1,32 @@
 import bpy
 
+def sort_armature_collections(armature, only_collection=None, custom_collection=None, to_index=None):
+    order = {'Main':0, 'Secondary':1, 'Deform':2, 'Reference':3}
+    
+    def get_col_idx(name):
+        for i, coll in enumerate(armature.data.collections):          
+            if coll.name == name:
+                return i
+                
+    # sort a specific custom collection with custom index
+    if custom_collection and to_index != None:
+        col = armature.data.collections.get(custom_collection)  
+        cur_idx = get_col_idx(custom_collection)       
+        armature.data.collections.move(cur_idx, to_index)
+        return
+      
+    # sort collections as defined in the "order" dict
+    for col_name in order:
+        if only_collection:
+            if only_collection != col_name:
+                continue
+                
+        col = armature.data.collections.get(col_name)  
+        cur_idx = get_col_idx(col_name)
+        to_idx = order[col_name]       
+        armature.data.collections.move(cur_idx, to_idx)
+        
+
 def get_parent_collections(target):
     # return the list of all parent collections to the specified target collection
     # with a recursive function. A sub-function is used, string based, to ease the process

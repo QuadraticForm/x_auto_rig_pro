@@ -1,7 +1,127 @@
 import bpy
 from math import *
 from mathutils import *
+import numpy as np
 
+def resample_curve(coords, length=1.0, amount=5):
+    # resample a given set of points belonging to a curve
+    # only works by reduction
+
+    resampled_coords = []
+    dist_sum = 0.0
+    dist = length/amount
+    for i, coord in enumerate(coords):
+        # special case, since we need symmetrical positioning, 
+        # the first coord must be positioned half-distance
+        if len(resampled_coords) == 0:
+            if coord == coords[0]:
+                continue
+            
+            p_prev = coords[i-1]
+            cur_dist = (coord-p_prev).magnitude
+            dist_sum += cur_dist
+            
+            if dist_sum >= dist/2:
+                dist_sum = 0.0
+                #print('resample', i)
+                resampled_coords.append(coord.copy())       
+            
+        else:
+            p_prev = coords[i-1]
+            cur_dist = (coord-p_prev).magnitude    
+            dist_sum += cur_dist
+            
+            if dist_sum < dist:
+                continue
+            else:
+                dist_sum = 0.0
+                #print('resample', i)
+                resampled_coords.append(coord.copy())
+    
+    # In case of precision error, the last coord did not fit in. 
+    # Make sure to include it
+    print('resampled_coords', len(resampled_coords), 'amount', amount)
+    if len(resampled_coords) == amount - 1:
+        print('Curve resampling error, add last coord as tip coord')
+        tip_coord = coords[len(coords)-2]
+        resampled_coords.append(tip_coord)
+        
+        
+    return resampled_coords
+    
+
+def get_curve_length(coords):
+    length = 0.0
+    p_last = None
+    
+    for coord in coords:
+        if p_last == None:
+            p_last = coord.copy()           
+        else:
+            length += (coord-p_last).magnitude
+            p_last = coord.copy()         
+        
+    return length
+    
+    
+def nurbs_basis(i, degree, u, knots):
+    if degree == 0:
+        return 1.0 if knots[i] <= u < knots[i + 1] else 0.0
+    if knots[i + degree] == knots[i]:
+        left = 0.0
+    else:
+        left = (u - knots[i]) / (knots[i + degree] - knots[i]) * nurbs_basis(i, degree - 1, u, knots)
+    if knots[i + degree + 1] == knots[i + 1]:
+        right = 0.0
+    else:
+        right = (knots[i + degree + 1] - u) / (knots[i + degree + 1] - knots[i + 1]) * nurbs_basis(i + 1, degree - 1, u, knots)
+    return left + right
+
+
+def generate_nurbs_curve(points, degree=3, num_points=100):
+
+    if len(points) < degree + 1:
+        raise ValueError("Number of points should be at least degree + 1.")
+
+    # Convert control points to numpy array
+    control_points = np.array(points)
+
+    # Calculate the number of knots needed for a closed curve
+    num_knots = len(control_points) + degree + 1
+
+    # Create a list of equally spaced parameter values for the control points
+    parameter_values = np.linspace(0, 1, len(control_points))
+
+     # Compute the knot vector (closed curve)
+    knots = np.zeros(num_knots)
+    knots[degree:-degree] = np.linspace(0, 1, num_knots - 2*degree)
+    knots[-degree:] = 1
+
+
+    # Evaluate the NURBS curve at 'num_points' points
+    u_new = np.linspace(0, 1, num_points)
+    
+    x = np.zeros(num_points)
+    y = np.zeros(num_points)
+    z = np.zeros(num_points)
+    for i in range(len(u_new)):
+        if i == len(u_new)-1:# the last one must be set manually, sigh
+            x[i] += control_points[len(points)-1, 0]
+            y[i] += control_points[len(points)-1, 1]
+            z[i] += control_points[len(points)-1, 2]           
+            break
+        for j in range(len(control_points)):
+            basis = nurbs_basis(j, degree, u_new[i], knots)
+            x[i] += control_points[j, 0] * basis
+            y[i] += control_points[j, 1] * basis
+            z[i] += control_points[j, 2] * basis            
+            
+    coords = []    
+    for _x, _y, _z in zip(x, y, z):
+        coord = Vector((_x, _y, _z))
+        coords.append(coord)
+
+    return coords#x, y, z
 
 
 def signed_angle(vector_u, vector_v, normal):
@@ -75,6 +195,14 @@ def project_point_onto_plane(q, p, n):
     # n = plane normal
     n = n.normalized()
     return q - ((q - p).dot(n)) * n
+    
+    
+def project_vec_onto_plane(x, n):
+    # x: Vector
+    # n: plane normal vector
+    d = x.dot(n) / n.magnitude
+    p = [d * n.normalized()[i] for i in range(len(n))]
+    return Vector([x[i] - p[i] for i in range(len(x))])
 
 
 def get_pole_angle(base_bone, ik_bone, pole_location):
@@ -89,14 +217,7 @@ def smooth_interpolate(value, linear=0.0):
     smooth = (cos((value*pi + pi )) + 1) /2    
     return (smooth*(1-linear)) + (value*linear)
     
-'''   
-def round_interpolate(value, linear=0.0):
-    # value: float belonging to [0, 1]
-    # return the smooth-rounded interpolated value using cosinus function
-    smooth = (cos((value/2*pi + pi )) + 1)
-    return (smooth*(1-linear)) + (value*linear)
 
-'''
 def round_interpolate(value, linear=0.0, repeat=1):
     # value: float belonging to [0, 1]
     # return the smooth-rounded interpolated value using cosinus function

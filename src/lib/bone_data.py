@@ -5,12 +5,13 @@ class ARP_BonesData:
     custom_bones_list = []
     softlink_bones = []
     armature_name = ''
-    renamed_bones = {}
+    #renamed_bones = {}
     
     def init_values(self):
         self.custom_bones_list = []
         self.softlink_bones = []
-        self.renamed_bones = {}
+        #self.renamed_bones = {}
+        self.const_interp_bones = []
         
     def collect(self, arm_name):  
         self.armature_name = arm_name
@@ -38,9 +39,13 @@ class ARP_BonesData:
                         self.softlink_bones.append(b.name)
                         add_stretch_bones(b)
                         
-                if 'rename' in b.keys():
-                    if not b.name in self.renamed_bones:
-                        self.renamed_bones[b.name] = b['rename']
+                #if 'rename' in b.keys():
+                #    if not b.name in self.renamed_bones:
+                #        self.renamed_bones[b.name] = b['rename']
+                        
+                if 'const_interp' in b.keys():
+                    if not b.name in self.const_interp_bones:
+                        self.const_interp_bones.append(b.name)
 
             if b.name.startswith("cc_"):
                 found_bone = True
@@ -69,9 +74,13 @@ class ARP_BonesData:
                         self.softlink_bones.append(b.name)
                         add_stretch_bones(b)
                         
-                if 'rename' in b.keys():
-                    if not b.name in self.renamed_bones:
-                        self.renamed_bones[b.name] = b['rename']
+                #if 'rename' in b.keys():
+                #    if not b.name in self.renamed_bones:
+                #        self.renamed_bones[b.name] = b['rename']
+                        
+                if 'const_interp' in b.keys():
+                    if not b.name in self.const_interp_bones:
+                        self.const_interp_bones.append(b.name)
         
         
     
@@ -89,6 +98,11 @@ def exclude_custom_bone(bone_name):
 def is_softlink_bone(bone_name):
     return bone_name in arp_bones_data.softlink_bones
     
+    
+def is_const_interp_bone(bone_name):
+    return bone_name in arp_bones_data.const_interp_bones
+    
+    
 def get_renamed_bone(bone_name):
     if bone_name in arp_bones_data.renamed_bones:
         return arp_bones_data.renamed_bones[bone_name]
@@ -100,16 +114,6 @@ def get_bone_base_name(bone_name):
     if "_dupli_" in bone_name:
         base_name = bone_name[:-12]
     return base_name
-
-
-def set_bone_layer(editbone, layer_idx, multi=False):
-    editbone.layers[layer_idx] = True
-    if multi:
-        return
-        
-    for i, lay in enumerate(editbone.layers):
-        if i != layer_idx:
-            editbone.layers[i] = False
 
 
 def retarget_bone_side(bone_name, target_side, dupli_only=False):#"head.x", "_dupli_001.x"

@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# <pep8 compliant>
-
 # Script copyright (C) Campbell Barton, Bastien Montagne
 
-import ast# Auto-Rig Pro implant
-from collections import OrderedDict# Auto-Rig Pro implant
-import array
+
+# Auto-Rig Pro implant
+import ast, array
+from collections import OrderedDict
+from ..utils import *
+
 import datetime
 import math
+import numpy as np                  
 import os
 import time
 
 from itertools import zip_longest, chain
+from functools import cache                
 
 if "bpy" in locals():
     import importlib
@@ -26,15 +29,16 @@ if "bpy" in locals():
 import bpy
 import bpy_extras
 from bpy_extras import node_shader_utils
+from bpy.app.translations import pgettext_tip as tip_                                                     
 from mathutils import Vector, Matrix
-from ..utils import *# Auto-Rig Pro implant
+
 from . import encode_bin, data_types, fbx_utils
 from .fbx_utils import (
     # Constants.
     FBX_VERSION, FBX_HEADER_VERSION, FBX_SCENEINFO_VERSION, FBX_TEMPLATES_VERSION,
     FBX_MODELS_VERSION,
     FBX_GEOMETRY_VERSION, FBX_GEOMETRY_NORMAL_VERSION, FBX_GEOMETRY_BINORMAL_VERSION, FBX_GEOMETRY_TANGENT_VERSION,
-    FBX_GEOMETRY_SMOOTHING_VERSION, FBX_GEOMETRY_VCOLOR_VERSION, FBX_GEOMETRY_UV_VERSION,
+    FBX_GEOMETRY_SMOOTHING_VERSION, FBX_GEOMETRY_CREASE_VERSION, FBX_GEOMETRY_VCOLOR_VERSION, FBX_GEOMETRY_UV_VERSION,
     FBX_GEOMETRY_MATERIAL_VERSION, FBX_GEOMETRY_LAYER_VERSION,
     FBX_GEOMETRY_SHAPE_VERSION, FBX_DEFORMER_SHAPE_VERSION, FBX_DEFORMER_SHAPECHANNEL_VERSION,
     FBX_POSE_BIND_VERSION, FBX_DEFORMER_SKIN_VERSION, FBX_DEFORMER_CLUSTER_VERSION,
@@ -48,9 +52,10 @@ from .fbx_utils import (
     # Miscellaneous utils.
     PerfMon,
     units_blender_to_fbx_factor, units_convertor, units_convertor_iter,
-    matrix4_to_array, similar_values, similar_values_iter,
+    matrix4_to_array, similar_values, shape_difference_exclude_similar, astype_view_signedness, fast_first_axis_unique,
+    fast_first_axis_flat,
     # Mesh transform helpers.
-    vcos_transformed_gen, nors_transformed_gen,
+    vcos_transformed, nors_transformed,
     # UUID from key.
     get_fbx_uuid_from_key,
     # Key generators.
@@ -77,7 +82,7 @@ from .fbx_utils import (
     # Animation.
     AnimationCurveNodeWrapper,
     # Objects.
-    ObjectWrapper, fbx_name_class,
+    ObjectWrapper, fbx_name_class, ensure_object_not_in_edit_mode,
     # Top level.
     FBXExportSettingsMedia, FBXExportSettings, FBXExportData,
 )
@@ -758,7 +763,7 @@ def fbx_data_bindpose_element(root, me_obj, me, scene_data, arm_obj=None, mat_wo
 
     return mat_world_obj, mat_world_bones
     
-    
+# Auto-Rig Pro implant
 def fbx_data_bindpose_only(root, scene_data, armature=None, mat_world_armature=None, bones_list=[]):
     """
     Helper, since bindpose are used by both meshes shape keys and armature bones...
@@ -812,17 +817,23 @@ def fbx_data_mesh_shapes_elements(root, me_obj, me, scene_data, fbx_me_tmpl, fbx
 
     channels = []
 
+    vertices = me.vertices                      
     for shape, (channel_key, geom_key, shape_verts_co, shape_verts_idx) in shapes.items():
         # Use vgroups as weights, if defined.
         if shape.vertex_group and shape.vertex_group in me_obj.bdata.vertex_groups:
-            shape_verts_weights = [0.0] * (len(shape_verts_co) // 3)
+            shape_verts_weights = np.zeros(len(shape_verts_idx), dtype=np.float64)
+            # It's slightly faster to iterate and index the underlying memoryview objects
+            mv_shape_verts_weights = shape_verts_weights.data
+            mv_shape_verts_idx = shape_verts_idx.data
             vg_idx = me_obj.bdata.vertex_groups[shape.vertex_group].index
-            for sk_idx, v_idx in enumerate(shape_verts_idx):
-                for vg in me.vertices[v_idx].groups:
+            for sk_idx, v_idx in enumerate(mv_shape_verts_idx):
+                for vg in vertices[v_idx].groups:
                     if vg.group == vg_idx:
-                        shape_verts_weights[sk_idx] = vg.weight * 100.0
+                        mv_shape_verts_weights[sk_idx] = vg.weight
+                        break
+            shape_verts_weights *= 100.0
         else:
-            shape_verts_weights = [100.0] * (len(shape_verts_co) // 3)
+            shape_verts_weights = np.full(len(shape_verts_idx), 100.0, dtype=np.float64)
         channels.append((channel_key, shape, shape_verts_weights))
 
         geom = elem_data_single_int64(root, b"Geometry", get_fbx_uuid_from_key(geom_key))
@@ -838,7 +849,7 @@ def fbx_data_mesh_shapes_elements(root, me_obj, me, scene_data, fbx_me_tmpl, fbx
         elem_data_single_int32_array(geom, b"Indexes", shape_verts_idx)
         elem_data_single_float64_array(geom, b"Vertices", shape_verts_co)
         if write_normals:
-            elem_data_single_float64_array(geom, b"Normals", [0.0] * len(shape_verts_co))
+            elem_data_single_float64_array(geom, b"Normals", np.zeros(len(shape_verts_idx) * 3, dtype=np.float64))
 
     # Yiha! BindPose for shapekeys too! Dodecasigh...
     # XXX Not sure yet whether several bindposes on same mesh are allowed, or not... :/
@@ -922,7 +933,10 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
 
         if last_subsurf:
             elem_data_single_int32(geom, b"Smoothness", 2) # Display control mesh and smoothed
-            elem_data_single_int32(geom, b"BoundaryRule", 2) # Round edges like Blender
+            if last_subsurf.boundary_smooth == "PRESERVE_CORNERS":
+                elem_data_single_int32(geom, b"BoundaryRule", 1) # CreaseAll
+            else:
+                elem_data_single_int32(geom, b"BoundaryRule", 2) # CreaseEdge
             elem_data_single_int32(geom, b"PreviewDivisionLevels", last_subsurf.levels)
             elem_data_single_int32(geom, b"RenderDivisionLevels", last_subsurf.render_levels)
 
@@ -935,9 +949,11 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     elem_data_single_int32(geom, b"GeometryVersion", FBX_GEOMETRY_VERSION)
 
     # Vertex cos.
-    t_co = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.vertices) * 3
+    co_bl_dtype = np.single
+    co_fbx_dtype = np.float64
+    t_co = np.empty(len(me.vertices) * 3, dtype=co_bl_dtype)
     me.vertices.foreach_get("co", t_co)
-    elem_data_single_float64_array(geom, b"Vertices", chain(*vcos_transformed_gen(t_co, geom_mat_co)))
+    elem_data_single_float64_array(geom, b"Vertices", vcos_transformed(t_co, geom_mat_co, co_fbx_dtype))
     del t_co
 
     # Polygon indices.
@@ -945,19 +961,60 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     # We do loose edges as two-vertices faces, if enabled...
     #
     # Note we have to process Edges in the same time, as they are based on poly's loops...
-    loop_nbr = len(me.loops)
-    t_pvi = array.array(data_types.ARRAY_INT32, (0,)) * loop_nbr
-    t_ls = [None] * len(me.polygons)
 
-    me.loops.foreach_get("vertex_index", t_pvi)
+    # Total number of loops, including any extra added for loose edges.
+    loop_nbr = len(me.loops)       
+
+    # dtypes matching the C data. Matching the C datatype avoids iteration and casting of every element in foreach_get's
+    # C code.
+    bl_vertex_index_dtype = bl_edge_index_dtype = bl_loop_index_dtype = np.uintc
+
+    # Start vertex indices of loops. May contain elements for loops added for the export of loose edges.
+    t_lvi = np.empty(len(me.loops), dtype=bl_vertex_index_dtype)
+
+    # Loop start indices of polygons. May contain elements for the polygons added for the export of loose edges.
+    t_ls = np.empty(len(me.polygons), dtype=bl_loop_index_dtype)
+
+    # Vertex indices of edges (unsorted, unlike Mesh.edge_keys), flattened into an array twice the length of the number
+    # of edges.
+    t_ev = np.empty(len(me.edges) * 2, dtype=bl_vertex_index_dtype)
+    # Each edge has two vertex indices, so it's useful to view the array as 2d where each element on the first axis is a
+    # pair of vertex indices
+    t_ev_pair_view = t_ev.view()
+    t_ev_pair_view.shape = (-1, 2)
+
+    # Edge indices of loops. May contain elements for loops added for the export of loose edges.
+    t_lei = np.empty(len(me.loops), dtype=bl_edge_index_dtype)
+
+    me.loops.foreach_get("vertex_index", t_lvi)
     me.polygons.foreach_get("loop_start", t_ls)
+    me.edges.foreach_get("vertices", t_ev)
+    me.loops.foreach_get("edge_index", t_lei)
 
-    # Add "fake" faces for loose edges.
+    # Add "fake" faces for loose edges. Each "fake" face consists of two loops creating a new 2-sided polygon.
     if scene_data.settings.use_mesh_edges:
-        t_le = tuple(e.vertices for e in me.edges if e.is_loose)
-        t_pvi.extend(chain(*t_le))
-        t_ls.extend(range(loop_nbr, loop_nbr + len(t_le), 2))
+        bl_edge_is_loose_dtype = bool
+        # Get the mask of edges that are loose
+        loose_mask = np.empty(len(me.edges), dtype=bl_edge_is_loose_dtype)
+        me.edges.foreach_get('is_loose', loose_mask)
+
+        indices_of_loose_edges = np.flatnonzero(loose_mask)
+        # Since we add two loops per loose edge, repeat the indices so that there's one for each new loop
+        new_loop_edge_indices = np.repeat(indices_of_loose_edges, 2)
+
+        # Get the loose edge vertex index pairs
+        t_le = t_ev_pair_view[loose_mask]
+
+        # append will automatically flatten the pairs in t_le
+        t_lvi = np.append(t_lvi, t_le)
+        t_lei = np.append(t_lei, new_loop_edge_indices)
+        # Two loops are added per loose edge
+        loop_nbr += 2 * len(t_le)
+        t_ls = np.append(t_ls, np.arange(len(me.loops), loop_nbr, 2, dtype=t_ls.dtype))
         del t_le
+        del loose_mask
+        del indices_of_loose_edges
+        del new_loop_edge_indices
 
     # Edges...
     # Note: Edges are represented as a loop here: each edge uses a single index, which refers to the polygon array.
@@ -967,78 +1024,136 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     #                 for loose edges).
     #       We also have to store a mapping from real edges to their indices in this array, for edge-mapped data
     #       (like e.g. crease).
-    t_eli = array.array(data_types.ARRAY_INT32)
-    edges_map = {}
-    edges_nbr = 0
-    if t_ls and t_pvi:
-        t_ls = set(t_ls)
-        todo_edges = [None] * len(me.edges) * 2
-        # Sigh, cannot access edge.key through foreach_get... :/
-        me.edges.foreach_get("vertices", todo_edges)
-        todo_edges = set((v1, v2) if v1 < v2 else (v2, v1) for v1, v2 in zip(*(iter(todo_edges),) * 2))
+    eli_fbx_dtype = np.int32
+    
+    # Edge index of each unique edge-key, used to map per-edge data to unique edge-keys (t_pvi).
+    t_pvi_edge_indices = np.empty(0, dtype=t_lei.dtype)
 
-        li = 0
-        vi = vi_start = t_pvi[0]
-        for li_next, vi_next in enumerate(t_pvi[1:] + t_pvi[:1], start=1):
-            if li_next in t_ls:  # End of a poly's loop.
-                vi2 = vi_start
-                vi_start = vi_next
-            else:
-                vi2 = vi_next
+    pvi_fbx_dtype = np.int32
+    if t_ls.size and t_lvi.size:
+        # Get unsorted edge keys by indexing the edge->vertex-indices array by the loop->edge-index array.
+        t_pvi_edge_keys = t_ev_pair_view[t_lei]
 
-            e_key = (vi, vi2) if vi < vi2 else (vi2, vi)
-            if e_key in todo_edges:
-                t_eli.append(li)
-                todo_edges.remove(e_key)
-                edges_map[e_key] = edges_nbr
-                edges_nbr += 1
+        # Sort each [edge_start_n, edge_end_n] pair to get edge keys. Heapsort seems to be the fastest for this specific
+        # use case.
+        t_pvi_edge_keys.sort(axis=1, kind='heapsort')
 
-            vi = vi_next
-            li = li_next
-    # End of edges!
+        # Note that finding unique edge keys means that if there are multiple edges that share the same vertices (which
+        # shouldn't normally happen), only the first edge found in loops will be exported along with its per-edge data.
+        # To export separate edges that share the same vertices, fast_first_axis_unique can be replaced with np.unique
+        # with t_lei as the first argument, finding unique edges rather than unique edge keys.
+        #
+        # Since we want the unique values in their original order, the only part we care about is the indices of the
+        # first occurrence of the unique elements in t_pvi_edge_keys, so we can use our fast uniqueness helper function.
+        t_eli = fast_first_axis_unique(t_pvi_edge_keys, return_unique=False, return_index=True)
 
-    # We have to ^-1 last index of each loop.
-    for ls in t_ls:
-        t_pvi[ls - 1] ^= -1
+        # To get the indices of the elements in t_pvi_edge_keys that produce unique values, but in the original order of
+        # t_pvi_edge_keys, t_eli must be sorted.
+        # Due to loops and their edge keys tending to have a partial ordering within meshes, sorting with kind='stable'
+        # with radix sort tends to be faster than the default of kind='quicksort' with introsort.
+        t_eli.sort(kind='stable')
+
+    # Edge index of each element in unique t_pvi_edge_keys, used to map per-edge data such as sharp and creases.
+        t_pvi_edge_indices = t_lei[t_eli]
+
+        # We have to ^-1 last index of each loop.
+        # Ensure t_pvi is the correct number of bits before inverting.
+        # t_lvi may be used again later, so always create a copy to avoid modifying it in the next step.
+        t_pvi = t_lvi.astype(pvi_fbx_dtype)
+        # The index of the end of each loop is one before the index of the start of the next loop.
+        t_pvi[t_ls[1:] - 1] ^= -1
+        # The index of the end of the last loop will be the very last index.
+        t_pvi[-1] ^= -1
+        del t_pvi_edge_keys
+    else:
+        # Should be empty, but make sure it's the correct type.
+        t_pvi = np.empty(0, dtype=pvi_fbx_dtype)
+        t_eli = np.empty(0, dtype=eli_fbx_dtype)
 
     # And finally we can write data!
+    t_pvi = astype_view_signedness(t_pvi, pvi_fbx_dtype)
+    t_eli = astype_view_signedness(t_eli, eli_fbx_dtype)
     elem_data_single_int32_array(geom, b"PolygonVertexIndex", t_pvi)
     elem_data_single_int32_array(geom, b"Edges", t_eli)
-    del t_pvi
-    del t_ls
+    del t_pvi            
     del t_eli
+    del t_ev
+    del t_ev_pair_view
 
     # And now, layers!
 
     # Smoothing.
     if smooth_type in {'FACE', 'EDGE'}:
-        t_ps = None
+        ps_fbx_dtype = np.int32
+        poly_use_smooth_dtype = bool
+        edge_use_sharp_dtype = bool
         _map = b""
         if smooth_type == 'FACE':
-            t_ps = array.array(data_types.ARRAY_INT32, (0,)) * len(me.polygons)
+            t_ps = np.empty(len(me.polygons), dtype=poly_use_smooth_dtype)
             me.polygons.foreach_get("use_smooth", t_ps)
             _map = b"ByPolygon"
         else:  # EDGE
-            # Write Edge Smoothing.
-            # Note edge is sharp also if it's used by more than two faces, or one of its faces is flat.
-            t_ps = array.array(data_types.ARRAY_INT32, (0,)) * edges_nbr
-            sharp_edges = set()
-            temp_sharp_edges = {}
-            for p in me.polygons:
-                if not p.use_smooth:
-                    sharp_edges.update(p.edge_keys)
-                    continue
-                for k in p.edge_keys:
-                    if temp_sharp_edges.setdefault(k, 0) > 1:
-                        sharp_edges.add(k)
-                    else:
-                        temp_sharp_edges[k] += 1
-            del temp_sharp_edges
-            for e in me.edges:
-                if e.key not in edges_map:
-                    continue  # Only loose edges, in theory!
-                t_ps[edges_map[e.key]] = not (e.use_edge_sharp or (e.key in sharp_edges))
             _map = b"ByEdge"
+            if t_pvi_edge_indices.size:
+                # Write Edge Smoothing.
+                # Note edge is sharp also if it's used by more than two faces, or one of its faces is flat.
+                mesh_poly_nbr = len(me.polygons)
+                mesh_edge_nbr = len(me.edges)
+                mesh_loop_nbr = len(me.loops)
+                # t_ls and t_lei may contain extra polygons or loops added for loose edges that are not present in the
+                # mesh data, so create views that exclude the extra data added for loose edges.
+                mesh_t_ls_view = t_ls[:mesh_poly_nbr]
+                mesh_t_lei_view = t_lei[:mesh_loop_nbr]
+
+                # - Get sharp edges from flat shaded faces
+                # Get the 'use_smooth' attribute of all polygons.
+                p_use_smooth_mask = np.empty(mesh_poly_nbr, dtype=poly_use_smooth_dtype)
+                me.polygons.foreach_get('use_smooth', p_use_smooth_mask)
+                # Invert to get all flat shaded polygons.
+                p_flat_mask = np.invert(p_use_smooth_mask, out=p_use_smooth_mask)
+                # Convert flat shaded polygons to flat shaded loops by repeating each element by the number of sides of
+                # that polygon.
+                # Polygon sides can be calculated from the element-wise difference of loop starts appended by the number
+                # of loops. Alternatively, polygon sides can be retrieved directly from the 'loop_total' attribute of
+                # polygons, but since we already have t_ls, it tends to be quicker to calculate from t_ls when above
+                # around 10_000 polygons.
+                polygon_sides = np.diff(mesh_t_ls_view, append=mesh_loop_nbr)
+                p_flat_loop_mask = np.repeat(p_flat_mask, polygon_sides)
+                # Convert flat shaded loops to flat shaded (sharp) edge indices.
+                # Note that if an edge is in multiple loops that are part of flat shaded faces, its edge index will end
+                # up in sharp_edge_indices_from_polygons multiple times.
+                sharp_edge_indices_from_polygons = mesh_t_lei_view[p_flat_loop_mask]
+
+                # - Get sharp edges from edges marked as sharp
+                e_use_sharp_mask = np.empty(mesh_edge_nbr, dtype=edge_use_sharp_dtype)
+                me.edges.foreach_get('use_edge_sharp', e_use_sharp_mask)
+
+                # - Get sharp edges from edges used by more than two loops (and therefore more than two faces)
+                e_more_than_two_faces_mask = np.bincount(mesh_t_lei_view, minlength=mesh_edge_nbr) > 2
+
+                # - Combine with edges that are sharp because they're in more than two faces
+                e_use_sharp_mask = np.logical_or(e_use_sharp_mask, e_more_than_two_faces_mask, out=e_use_sharp_mask)
+
+                # - Combine with edges that are sharp because a polygon they're in has flat shading
+                e_use_sharp_mask[sharp_edge_indices_from_polygons] = True
+
+                # - Convert sharp edges to sharp edge keys (t_pvi)
+                ek_use_sharp_mask = e_use_sharp_mask[t_pvi_edge_indices]
+
+                # - Sharp edges are indicated in FBX as zero (False), so invert
+                t_ps = np.invert(ek_use_sharp_mask, out=ek_use_sharp_mask)
+                del ek_use_sharp_mask
+                del e_use_sharp_mask
+                del sharp_edge_indices_from_polygons
+                del p_flat_loop_mask
+                del polygon_sides
+                del p_flat_mask
+                del p_use_smooth_mask
+                del mesh_t_lei_view
+                del mesh_t_ls_view
+            else:
+                t_ps = np.empty(0, dtype=ps_fbx_dtype)
+        t_ps = t_ps.astype(ps_fbx_dtype, copy=False)                 
         lay_smooth = elem_data_single_int32(geom, b"LayerElementSmoothing", 0)
         elem_data_single_int32(lay_smooth, b"Version", FBX_GEOMETRY_SMOOTHING_VERSION)
         elem_data_single_string(lay_smooth, b"Name", b"")
@@ -1046,11 +1161,40 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
         elem_data_single_string(lay_smooth, b"ReferenceInformationType", b"Direct")
         elem_data_single_int32_array(lay_smooth, b"Smoothing", t_ps)  # Sight, int32 for bool...
         del t_ps
+    del t_ls
+    del t_lei
 
-    # TODO: Edge crease (LayerElementCrease).
+    # Edge crease for subdivision
+    if write_crease:
+        ec_fbx_dtype = np.float64
+        if t_pvi_edge_indices.size:
+            ec_bl_dtype = np.single
+            t_ec_raw = np.empty(len(me.edges), dtype=ec_bl_dtype)
+            me.edges.foreach_get('crease', t_ec_raw)
+
+            # Convert to t_pvi edge-keys.
+            t_ec_ek_raw = t_ec_raw[t_pvi_edge_indices]
+
+            # Blender squares those values before sending them to OpenSubdiv, when other software don't,
+            # so we need to compensate that to get similar results through FBX...
+            # Use the precision of the fbx dtype for the calculation since it's usually higher precision.
+            t_ec_ek_raw = t_ec_ek_raw.astype(ec_fbx_dtype, copy=False)
+            t_ec = np.square(t_ec_ek_raw, out=t_ec_ek_raw)
+            del t_ec_ek_raw
+            del t_ec_raw
+        else:
+            t_ec = np.empty(0, dtype=ec_fbx_dtype)
+
+        lay_crease = elem_data_single_int32(geom, b"LayerElementEdgeCrease", 0)
+        elem_data_single_int32(lay_crease, b"Version", FBX_GEOMETRY_CREASE_VERSION)
+        elem_data_single_string(lay_crease, b"Name", b"")
+        elem_data_single_string(lay_crease, b"MappingInformationType", b"ByEdge")
+        elem_data_single_string(lay_crease, b"ReferenceInformationType", b"Direct")
+        elem_data_single_float64_array(lay_crease, b"EdgeCrease", t_ec)
+        del t_ec
 
     # And we are done with edges!
-    del edges_map
+    del t_pvi_edge_indices
 
     # Loop normals.
     tspacenumber = 0
@@ -1060,28 +1204,35 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
         #     but this does not seem well supported by apps currently...
         me.calc_normals_split()
 
-        t_ln = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops) * 3
+        ln_bl_dtype = np.single
+        ln_fbx_dtype = np.float64
+        t_ln = np.empty(len(me.loops) * 3,  dtype=ln_bl_dtype)
         me.loops.foreach_get("normal", t_ln)
-        t_ln = nors_transformed_gen(t_ln, geom_mat_no)
+        t_ln = nors_transformed(t_ln, geom_mat_no, ln_fbx_dtype)
         if 0:
-            t_ln = tuple(t_ln)  # No choice... :/
-
+            lnidx_fbx_dtype = np.int32
             lay_nor = elem_data_single_int32(geom, b"LayerElementNormal", 0)
             elem_data_single_int32(lay_nor, b"Version", FBX_GEOMETRY_NORMAL_VERSION)
             elem_data_single_string(lay_nor, b"Name", b"")
             elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
             elem_data_single_string(lay_nor, b"ReferenceInformationType", b"IndexToDirect")
 
-            ln2idx = tuple(set(t_ln))
-            elem_data_single_float64_array(lay_nor, b"Normals", chain(*ln2idx))
+            # Tuple of unique sorted normals and then the index in the unique sorted normals of each normal in t_ln.
+            # Since we don't care about how the normals are sorted, only that they're unique, we can use the fast unique
+            # helper function.
+            t_ln, t_lnidx = fast_first_axis_unique(t_ln.reshape(-1, 3), return_inverse=True)
+
+            # Convert to the type for fbx
+            t_lnidx = astype_view_signedness(t_lnidx, lnidx_fbx_dtype)
+
+            elem_data_single_float64_array(lay_nor, b"Normals", t_ln)
             # Normal weights, no idea what it is.
-            # t_lnw = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(ln2idx)
+            # t_lnw = np.zeros(len(t_ln), dtype=np.float64)
             # elem_data_single_float64_array(lay_nor, b"NormalsW", t_lnw)
+                                                                 
+            elem_data_single_int32_array(lay_nor, b"NormalsIndex", t_lnidx)
 
-            ln2idx = {nor: idx for idx, nor in enumerate(ln2idx)}
-            elem_data_single_int32_array(lay_nor, b"NormalsIndex", (ln2idx[n] for n in t_ln))
-
-            del ln2idx
+            del t_lnidx
             # del t_lnw
         else:
             lay_nor = elem_data_single_int32(geom, b"LayerElementNormal", 0)
@@ -1089,147 +1240,284 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
             elem_data_single_string(lay_nor, b"Name", b"")
             elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
             elem_data_single_string(lay_nor, b"ReferenceInformationType", b"Direct")
-            elem_data_single_float64_array(lay_nor, b"Normals", chain(*t_ln))
+            elem_data_single_float64_array(lay_nor, b"Normals", t_ln)
             # Normal weights, no idea what it is.
-            # t_ln = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops)
+            # t_ln = np.zeros(len(me.loops), dtype=np.float64)
             # elem_data_single_float64_array(lay_nor, b"NormalsW", t_ln)
         del t_ln
 
         # tspace
-        if scene_data.settings.use_tspace:          
+        if scene_data.settings.use_tspace:
             tspacenumber = len(me.uv_layers)
             if tspacenumber:
                 # We can only compute tspace on tessellated meshes, need to check that here...
-                t_lt = [None] * len(me.polygons)
+                lt_bl_dtype = np.uintc
+                t_lt = np.empty(len(me.polygons), dtype=lt_bl_dtype)
                 me.polygons.foreach_get("loop_total", t_lt)
-                if any((lt > 4 for lt in t_lt)):
+                if (t_lt > 4).any():
                     del t_lt
                     scene_data.settings.report(
                         {'WARNING'},
-                        "Mesh '%s' has polygons with more than 4 vertices, "
-                        "cannot compute/export tangent space for it" % me.name)
+                        tip_("Mesh '%s' has polygons with more than 4 vertices, "
+                             "cannot compute/export tangent space for it") % me.name)
                 else:
                     del t_lt
-                    t_ln = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops) * 3
-                    # t_lnw = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops)
-                uv_names = [uvlayer.name for uvlayer in me.uv_layers]
-                for name in uv_names:
-                    me.calc_tangents(uvmap=name)
-                for idx, uvlayer in enumerate(me.uv_layers):
-                    name = uvlayer.name
-                    # Loop bitangents (aka binormals).
-                    # NOTE: this is not supported by importer currently.
-                    me.loops.foreach_get("bitangent", t_ln)
-                    lay_nor = elem_data_single_int32(geom, b"LayerElementBinormal", idx)
-                    elem_data_single_int32(lay_nor, b"Version", FBX_GEOMETRY_BINORMAL_VERSION)
-                    elem_data_single_string_unicode(lay_nor, b"Name", name)
-                    elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
-                    elem_data_single_string(lay_nor, b"ReferenceInformationType", b"Direct")
-                    elem_data_single_float64_array(lay_nor, b"Binormals",
-                                                   chain(*nors_transformed_gen(t_ln, geom_mat_no)))
-                    # Binormal weights, no idea what it is.
-                    # elem_data_single_float64_array(lay_nor, b"BinormalsW", t_lnw)
+                    num_loops = len(me.loops)
+                    t_ln = np.empty(num_loops * 3, dtype=ln_bl_dtype)
+                    # t_lnw = np.zeros(len(me.loops), dtype=np.float64)
+                    uv_names = [uvlayer.name for uvlayer in me.uv_layers]
+                    # Annoying, `me.calc_tangent` errors in case there is no geometry...
+                    if num_loops > 0:
+                        for name in uv_names:
+                            me.calc_tangents(uvmap=name)
+                    for idx, uvlayer in enumerate(me.uv_layers):
+                        name = uvlayer.name
+                        # Loop bitangents (aka binormals).
+                        # NOTE: this is not supported by importer currently.
+                        me.loops.foreach_get("bitangent", t_ln)
+                        lay_nor = elem_data_single_int32(geom, b"LayerElementBinormal", idx)
+                        elem_data_single_int32(lay_nor, b"Version", FBX_GEOMETRY_BINORMAL_VERSION)
+                        elem_data_single_string_unicode(lay_nor, b"Name", name)
+                        elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
+                        elem_data_single_string(lay_nor, b"ReferenceInformationType", b"Direct")
+                        elem_data_single_float64_array(lay_nor, b"Binormals",
+                                                       nors_transformed(t_ln, geom_mat_no, ln_fbx_dtype))
+                        # Binormal weights, no idea what it is.
+                        # elem_data_single_float64_array(lay_nor, b"BinormalsW", t_lnw)
 
-                    # Loop tangents.
-                    # NOTE: this is not supported by importer currently.
-                    me.loops.foreach_get("tangent", t_ln)
-                    lay_nor = elem_data_single_int32(geom, b"LayerElementTangent", idx)
-                    elem_data_single_int32(lay_nor, b"Version", FBX_GEOMETRY_TANGENT_VERSION)
-                    elem_data_single_string_unicode(lay_nor, b"Name", name)
-                    elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
-                    elem_data_single_string(lay_nor, b"ReferenceInformationType", b"Direct")
-                    elem_data_single_float64_array(lay_nor, b"Tangents",
-                                                   chain(*nors_transformed_gen(t_ln, geom_mat_no)))
-                    # Tangent weights, no idea what it is.
-                    # elem_data_single_float64_array(lay_nor, b"TangentsW", t_lnw)
+                        # Loop tangents.
+                        # NOTE: this is not supported by importer currently.
+                        me.loops.foreach_get("tangent", t_ln)
+                        lay_nor = elem_data_single_int32(geom, b"LayerElementTangent", idx)
+                        elem_data_single_int32(lay_nor, b"Version", FBX_GEOMETRY_TANGENT_VERSION)
+                        elem_data_single_string_unicode(lay_nor, b"Name", name)
+                        elem_data_single_string(lay_nor, b"MappingInformationType", b"ByPolygonVertex")
+                        elem_data_single_string(lay_nor, b"ReferenceInformationType", b"Direct")
+                        elem_data_single_float64_array(lay_nor, b"Tangents",
+                                                       nors_transformed(t_ln, geom_mat_no, ln_fbx_dtype))
+                        # Tangent weights, no idea what it is.
+                        # elem_data_single_float64_array(lay_nor, b"TangentsW", t_lnw)
 
-                del t_ln
-                # del t_lnw
-                me.free_tangents()
+                    del t_ln
+                    # del t_lnw
+                    me.free_tangents()
 
         me.free_normals_split()
 
     # Write VertexColor Layers.
-    vcolnumber = len(me.vertex_colors)
-    if vcolnumber:
-        def _coltuples_gen(raw_cols):
-            return zip(*(iter(raw_cols),) * 4)
+    if bpy.app.version >= (3,4,0):# new vertex colors only in latest versions
+        colors_type = scene_data.settings.colors_type
+        vcolnumber = 0 if colors_type == 'NONE' else len(me.color_attributes)
+        if vcolnumber:
+            color_prop_name = "color_srgb" if colors_type == 'SRGB' else "color"
+            # ByteColorAttribute color also gets returned by the API as single precision float
+            bl_lc_dtype = np.single
+            fbx_lc_dtype = np.float64
+            fbx_lcidx_dtype = np.int32
 
-        t_lc = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops) * 4
-        for colindex, collayer in enumerate(me.vertex_colors):
-            collayer.data.foreach_get("color", t_lc)
-            lay_vcol = elem_data_single_int32(geom, b"LayerElementColor", colindex)
-            elem_data_single_int32(lay_vcol, b"Version", FBX_GEOMETRY_VCOLOR_VERSION)
-            elem_data_single_string_unicode(lay_vcol, b"Name", collayer.name)
-            elem_data_single_string(lay_vcol, b"MappingInformationType", b"ByPolygonVertex")
-            elem_data_single_string(lay_vcol, b"ReferenceInformationType", b"IndexToDirect")
+            color_attributes = me.color_attributes
+            if scene_data.settings.prioritize_active_color:
+                active_color = me.color_attributes.active_color
+                color_attributes = sorted(color_attributes, key=lambda x: x == active_color, reverse=True)
 
-            col2idx = tuple(set(_coltuples_gen(t_lc)))
-            elem_data_single_float64_array(lay_vcol, b"Colors", chain(*col2idx))  # Flatten again...
+            for colindex, collayer in enumerate(color_attributes):
+                is_point = collayer.domain == "POINT"
+                vcollen = len(me.vertices if is_point else me.loops)
+                # Each rgba component is flattened in the array
+                t_lc = np.empty(vcollen * 4, dtype=bl_lc_dtype)
+                collayer.data.foreach_get(color_prop_name, t_lc)
+                lay_vcol = elem_data_single_int32(geom, b"LayerElementColor", colindex)
+                elem_data_single_int32(lay_vcol, b"Version", FBX_GEOMETRY_VCOLOR_VERSION)
+                elem_data_single_string_unicode(lay_vcol, b"Name", collayer.name)
+                elem_data_single_string(lay_vcol, b"MappingInformationType", b"ByPolygonVertex")
+                elem_data_single_string(lay_vcol, b"ReferenceInformationType", b"IndexToDirect")
 
-            col2idx = {col: idx for idx, col in enumerate(col2idx)}
-            elem_data_single_int32_array(lay_vcol, b"ColorIndex", (col2idx[c] for c in _coltuples_gen(t_lc)))
-            del col2idx
-        del t_lc
-        del _coltuples_gen
+                # Use the fast uniqueness helper function since we don't care about sorting.
+                t_lc, col_indices = fast_first_axis_unique(t_lc.reshape(-1, 4), return_inverse=True)
 
+                if is_point:
+                    # for "point" domain colors, we could directly emit them
+                    # with a "ByVertex" mapping type, but some software does not
+                    # properly understand that. So expand to full "ByPolygonVertex"
+                    # index map.
+                    # Ignore loops added for loose edges.
+                    col_indices = col_indices[t_lvi[:len(me.loops)]]
+
+                t_lc = t_lc.astype(fbx_lc_dtype, copy=False)
+                col_indices = astype_view_signedness(col_indices, fbx_lcidx_dtype)
+
+                elem_data_single_float64_array(lay_vcol, b"Colors", t_lc)
+                elem_data_single_int32_array(lay_vcol, b"ColorIndex", col_indices)
+        
+                del t_lc
+                del col_indices
+    else:
+        vcolnumber = len(me.vertex_colors)
+        if vcolnumber:
+            def _coltuples_gen(raw_cols):
+                return zip(*(iter(raw_cols),) * 4)
+
+            t_lc = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops) * 4
+            for colindex, collayer in enumerate(me.vertex_colors):
+                collayer.data.foreach_get("color", t_lc)
+                lay_vcol = elem_data_single_int32(geom, b"LayerElementColor", colindex)
+                elem_data_single_int32(lay_vcol, b"Version", FBX_GEOMETRY_VCOLOR_VERSION)
+                elem_data_single_string_unicode(lay_vcol, b"Name", collayer.name)
+                elem_data_single_string(lay_vcol, b"MappingInformationType", b"ByPolygonVertex")
+                elem_data_single_string(lay_vcol, b"ReferenceInformationType", b"IndexToDirect")
+
+                col2idx = tuple(set(_coltuples_gen(t_lc)))
+                elem_data_single_float64_array(lay_vcol, b"Colors", chain(*col2idx))  # Flatten again...
+
+                col2idx = {col: idx for idx, col in enumerate(col2idx)}
+                elem_data_single_int32_array(lay_vcol, b"ColorIndex", (col2idx[c] for c in _coltuples_gen(t_lc)))
+                del col2idx
+            del t_lc
+            del _coltuples_gen
+        
     # Write UV layers.
     # Note: LayerElementTexture is deprecated since FBX 2011 - luckily!
     #       Textures are now only related to materials, in FBX!
     uvnumber = len(me.uv_layers)
     if uvnumber:
+        luv_bl_dtype = np.single
+        luv_fbx_dtype = np.float64
+        lv_idx_fbx_dtype = np.int32
+
+        t_luv = np.empty(len(me.loops) * 2, dtype=luv_bl_dtype)
+        # Fast view for sort-based uniqueness of pairs.
+        t_luv_fast_pair_view = fast_first_axis_flat(t_luv.reshape(-1, 2))
+        # It must be a view of t_luv otherwise it won't update when t_luv is updated.
+        assert(t_luv_fast_pair_view.base is t_luv)
+
         # Looks like this mapping is also expected to convey UV islands (arg..... :((((( ).
         # So we need to generate unique triplets (uv, vertex_idx) here, not only just based on UV values.
-        def _uvtuples_gen(raw_uvs, raw_lvidxs):
-            return zip(zip(*(iter(raw_uvs),) * 2), raw_lvidxs)
+        # Ignore loops added for loose edges.
+        t_lvidx = t_lvi[:len(me.loops)]
 
-        t_luv = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.loops) * 2
-        t_lvidx = array.array(data_types.ARRAY_INT32, (0,)) * len(me.loops)
-        me.loops.foreach_get("vertex_index", t_lvidx)                                                                
-        for uvindex, uvlayer in enumerate(me.uv_layers):
-            uvlayer.data.foreach_get("uv", t_luv)
+        # If we were to create a combined array of (uv, vertex_idx) elements, we could find unique triplets by sorting
+        # that array by first sorting by the vertex_idx column and then sorting by the uv column using a stable sorting
+        # algorithm.
+        # This is exactly what we'll do, but without creating the combined array, because only the uv elements are
+        # included in the export and the vertex_idx column is the same for every uv layer.
+
+        # Because the vertex_idx column is the same for every uv layer, the vertex_idx column can be sorted in advance.
+        # argsort gets the indices that sort the array, which are needed to be able to sort the array of uv pairs in the
+        # same way to create the indices that recreate the full uvs from the unique uvs.
+        # Loops and vertices tend to naturally have a partial ordering, which makes sorting with kind='stable' (radix
+        # sort) faster than the default of kind='quicksort' (introsort) in most cases.
+        perm_vidx = t_lvidx.argsort(kind='stable')
+
+        # Mask and uv indices arrays will be modified and re-used by each uv layer.
+        unique_mask = np.empty(len(me.loops), dtype=np.bool_)
+        unique_mask[:1] = True
+        uv_indices = np.empty(len(me.loops), dtype=lv_idx_fbx_dtype)
+                  
+        for uvindex, uvlayer in enumerate(me.uv_layers):                                                 
             lay_uv = elem_data_single_int32(geom, b"LayerElementUV", uvindex)
             elem_data_single_int32(lay_uv, b"Version", FBX_GEOMETRY_UV_VERSION)
             elem_data_single_string_unicode(lay_uv, b"Name", uvlayer.name)
             elem_data_single_string(lay_uv, b"MappingInformationType", b"ByPolygonVertex")
             elem_data_single_string(lay_uv, b"ReferenceInformationType", b"IndexToDirect")
 
-            uv_ids = tuple(set(_uvtuples_gen(t_luv, t_lvidx)))
-            elem_data_single_float64_array(lay_uv, b"UV", chain(*(uv for uv, vidx in uv_ids)))  # Flatten again...
+            uvlayer.data.foreach_get("uv", t_luv)
 
-            uv2idx = {uv_id: idx for idx, uv_id in enumerate(uv_ids)}
-            try:# Auto-Rig Pro implant: Some UV layer may be invalid, not ideal but avoid the crash
-                elem_data_single_int32_array(lay_uv, b"UVIndex", (uv2idx[uv_id] for uv_id in _uvtuples_gen(t_luv, t_lvidx)))
-            except:
-                pass
-            del uv2idx
-            del uv_ids
-        del t_luv
+            # t_luv_fast_pair_view is a view in a dtype that compares elements by individual bytes, but float types have
+            # separate byte representations of positive and negative zero. For uniqueness, these should be considered
+            # the same, so replace all -0.0 with 0.0 in advance.
+            t_luv[t_luv == -0.0] = 0.0
+
+            # These steps to create unique_uv_pairs are the same as how np.unique would find unique values by sorting a
+            # structured array where each element is a triplet of (uv, vertex_idx), except uv and vertex_idx are
+            # separate arrays here and vertex_idx has already been sorted in advance.
+
+            # Sort according to the vertex_idx column, using the precalculated indices that sort it.
+            sorted_t_luv_fast = t_luv_fast_pair_view[perm_vidx]
+
+            # Get the indices that would sort the sorted uv pairs. Stable sorting must be used to maintain the sorting
+            # of the vertex indices.
+            perm_uv_pairs = sorted_t_luv_fast.argsort(kind='stable')
+            # Use the indices to sort both the uv pairs and the vertex_idx columns.
+            perm_combined = perm_vidx[perm_uv_pairs]
+            sorted_vidx = t_lvidx[perm_combined]
+            sorted_t_luv_fast = sorted_t_luv_fast[perm_uv_pairs]
+
+            # Create a mask where either the uv pair doesn't equal the previous value in the array, or the vertex index
+            # doesn't equal the previous value, these will be the unique uv-vidx triplets.
+            # For an imaginary triplet array:
+            # ...
+            # [(0.4, 0.2), 0]
+            # [(0.4, 0.2), 1] -> Unique because vertex index different from previous
+            # [(0.4, 0.2), 2] -> Unique because vertex index different from previous
+            # [(0.7, 0.6), 2] -> Unique because uv different from previous
+            # [(0.7, 0.6), 2]
+            # ...
+            # Output the result into unique_mask.
+            np.logical_or(sorted_t_luv_fast[1:] != sorted_t_luv_fast[:-1], sorted_vidx[1:] != sorted_vidx[:-1],
+                          out=unique_mask[1:])
+
+            # Get each uv pair marked as unique by the unique_mask and then view as the original dtype.
+            unique_uvs = sorted_t_luv_fast[unique_mask].view(luv_bl_dtype)
+
+            # NaN values are considered invalid and indicate a bug somewhere else in Blender or in an addon, we want
+            # these bugs to be reported instead of hiding them by allowing the export to continue.
+            if np.isnan(unique_uvs).any():
+                raise RuntimeError("UV layer %s on %r has invalid UVs containing NaN values" % (uvlayer.name, me))
+
+            # Convert to the type needed for fbx
+            unique_uvs = unique_uvs.astype(luv_fbx_dtype, copy=False)
+
+            # Set the indices of pairs in unique_uvs that reconstruct the pairs in t_luv into uv_indices.
+            # uv_indices will then be the same as an inverse array returned by np.unique with return_inverse=True.
+            uv_indices[perm_combined] = np.cumsum(unique_mask, dtype=uv_indices.dtype) - 1
+
+            elem_data_single_float64_array(lay_uv, b"UV", unique_uvs)                            
+            elem_data_single_int32_array(lay_uv, b"UVIndex", uv_indices)
+            del unique_uvs
+            del sorted_t_luv_fast
+            del sorted_vidx
+            del perm_uv_pairs
+            del perm_combined
+        del uv_indices
+        del unique_mask
+        del perm_vidx
         del t_lvidx
-        del _uvtuples_gen
+        del t_luv
+        del t_luv_fast_pair_view
+    del t_lvi
 
     # Face's materials.
     me_fbxmaterials_idx = scene_data.mesh_material_indices.get(me)
     if me_fbxmaterials_idx is not None:                                                                                  
         # We cannot use me.materials here, as this array is filled with None in case materials are linked to object...
-        me_blmaterials = [mat_slot.material for mat_slot in me_obj.material_slots]
+        me_blmaterials = me_obj.materials
         if me_fbxmaterials_idx and me_blmaterials:
             lay_ma = elem_data_single_int32(geom, b"LayerElementMaterial", 0)
             elem_data_single_int32(lay_ma, b"Version", FBX_GEOMETRY_MATERIAL_VERSION)
             elem_data_single_string(lay_ma, b"Name", b"")
             nbr_mats = len(me_fbxmaterials_idx)
             if nbr_mats > 1:
-                t_pm = array.array(data_types.ARRAY_INT32, (0,)) * len(me.polygons)
+                bl_pm_dtype = np.uintc
+                fbx_pm_dtype = np.int32
+                t_pm = np.empty(len(me.polygons), dtype=bl_pm_dtype)
                 me.polygons.foreach_get("material_index", t_pm)
 
                 # We have to validate mat indices, and map them to FBX indices.
-                # Note a mat might not be in me_fbxmats_idx (e.g. node mats are ignored).
-                blmaterials_to_fbxmaterials_idxs = [me_fbxmaterials_idx[m]
-                                                    for m in me_blmaterials if m in me_fbxmaterials_idx]
-                ma_idx_limit = len(blmaterials_to_fbxmaterials_idxs)
-                def_ma = blmaterials_to_fbxmaterials_idxs[0]
-                _gen = (blmaterials_to_fbxmaterials_idxs[m] if m < ma_idx_limit else def_ma for m in t_pm)
-                t_pm = array.array(data_types.ARRAY_INT32, _gen)
+                # Note a mat might not be in me_fbxmaterials_idx (e.g. node mats are ignored).
+
+                # The first valid material will be used for materials out of bounds of me_blmaterials or materials not
+                # in me_fbxmaterials_idx.
+                def_me_blmaterial_idx, def_ma = next(
+                    (i, me_fbxmaterials_idx[m]) for i, m in enumerate(me_blmaterials) if m in me_fbxmaterials_idx)
+
+                # Set material indices that are out of bounds to the default material index
+                mat_idx_limit = len(me_blmaterials)
+                t_pm[t_pm >= mat_idx_limit] = def_me_blmaterial_idx
+
+                # Map to FBX indices. Materials not in me_fbxmaterials_idx will be set to the default material index.
+                blmat_fbx_idx = np.fromiter((me_fbxmaterials_idx.get(m, def_ma) for m in me_blmaterials),
+                                            dtype=fbx_pm_dtype)
+                t_pm = blmat_fbx_idx[t_pm]
 
                 elem_data_single_string(lay_ma, b"MappingInformationType", b"ByPolygon")
                 # XXX Logically, should be "Direct" reference type, since we do not have any index array, and have one
@@ -1262,6 +1550,10 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     if smooth_type in {'FACE', 'EDGE'}:
         lay_smooth = elem_empty(layer, b"LayerElement")
         elem_data_single_string(lay_smooth, b"Type", b"LayerElementSmoothing")
+        elem_data_single_int32(lay_smooth, b"TypedIndex", 0)
+    if write_crease:
+        lay_smooth = elem_empty(layer, b"LayerElement")
+        elem_data_single_string(lay_smooth, b"Type", b"LayerElementEdgeCrease")
         elem_data_single_int32(lay_smooth, b"TypedIndex", 0)
     if vcolnumber:
         lay_vcol = elem_empty(layer, b"LayerElement")
@@ -1336,7 +1628,7 @@ def fbx_data_material_elements(root, ma, scene_data):
     # Principled BSDF only has an emissive color, so we assume factor to be always 1.0.
     if "emission_color" in dir(ma_wrap):# backward-compatibility with Blender 2.80
         elem_props_template_set(tmpl, props, "p_color", b"EmissiveColor", ma_wrap.emission_color)
-    elem_props_template_set(tmpl, props, "p_number", b"EmissiveFactor", 0.0)
+    elem_props_template_set(tmpl, props, "p_number", b"EmissiveFactor", ma_wrap.emission_strength)
     # Not in Principled BSDF, so assuming always 0
     elem_props_template_set(tmpl, props, "p_color", b"AmbientColor", ambient_color)
     elem_props_template_set(tmpl, props, "p_number", b"AmbientFactor", 0.0)
@@ -1512,6 +1804,14 @@ def fbx_data_video_elements(root, vid, scene_data):
     #~ else:
         #~ elem_data_single_bytes(fbx_vid, b"Content", b"")
 
+    # Blender currently has no UI for editing custom properties on Images, but the importer will import Image custom
+    # properties from either a Video Node or a Texture Node, preferring a Video node if one exists. We'll propagate
+    # these custom properties only to Video Nodes because that is most likely where they were imported from, and Texture
+    # Nodes are more like Blender's Shader Nodes than Images, which is what we're exporting here.
+    if scene_data.settings.use_custom_props:
+        fbx_data_element_custom_properties(props, vid)
+
+
 
 def fbx_data_armature_elements(root, arm_obj, scene_data):
     """
@@ -1567,7 +1867,7 @@ def fbx_data_armature_elements(root, arm_obj, scene_data):
             elem_data_single_int32(fbx_skin, b"Version", FBX_DEFORMER_SKIN_VERSION)
             elem_data_single_float64(fbx_skin, b"Link_DeformAcuracy", 50.0)  # Only vague idea what it is...
 
-            # Pre-process vertex weights (also to check vertices assigned ot more than four bones).
+            # Pre-process vertex weights (also to check vertices assigned to more than four bones).
             ob = ob_obj.bdata
             bo_vg_idx = {bo_obj.bdata.name: ob.vertex_groups[bo_obj.bdata.name].index
                          for bo_obj in clusters.keys() if bo_obj.bdata.name in ob.vertex_groups}
@@ -1616,16 +1916,7 @@ def fbx_data_armature_elements(root, arm_obj, scene_data):
         # warning, UE doesn't import skeleton only. Unity does
         print("Skeleton only, export bind pose anyway...")
         mat_world_obj, mat_world_bones = fbx_data_bindpose_only(root, scene_data, armature=arm_obj, mat_world_armature=mat_world_arm, bones_list=bones)
-        '''
-        # Deformer.
-        skin_key = get_blender_armature_skin_key(arm_obj.bdata, None)
-        fbx_skin = elem_data_single_int64(root, b"Deformer", get_fbx_uuid_from_key(skin_key))
-        fbx_skin.add_string(fbx_name_class(arm_obj.name.encode(), b"Deformer"))
-        fbx_skin.add_string(b"Skin")
-
-        elem_data_single_int32(fbx_skin, b"Version", FBX_DEFORMER_SKIN_VERSION)
-        elem_data_single_float64(fbx_skin, b"Link_DeformAcuracy", 50.0)
-        '''
+        
         clusters = {bo: get_blender_bone_cluster_key(arm_obj.bdata, None, bo.bdata) for bo in bones}
         
         for bo_obj, clstr_key in clusters.items():
@@ -1816,7 +2107,34 @@ def fbx_data_animation_elements(root, scene_data):
             # alayer = elem_data_single_int64(root, b"AnimationLayer", get_fbx_uuid_from_key(alayer_key))
             # alayer.add_string(fbx_name_class(ob_obj.name.encode(), b"AnimLayer"))
             # alayer.add_string(b"")
-
+            
+            # Auto-Rig Pro implant, support bones with constant keyframe interpolation
+            # Evaluate bone custom prop
+            const_interp = False     
+            
+            arm_name = None
+            split = ob_obj.split('#')
+            try:
+                arm_name = split[1].split('|')[0]
+            except:
+                print('Could not retrieve obj name from:', ob_obj)
+                
+            if arm_name:
+                obj = None
+                for o in scene_data.objects:# cannot get() here, iterate then
+                    if o.name == arm_name:
+                        obj = o
+                        break
+                if obj:
+                    if obj.type == 'ARMATURE':
+                        bone_name = split[len(split)-1]
+                        b = obj.bdata.data.bones.get(bone_name)
+                        if b:
+                            if 'const_interp' in b.keys() and b['const_interp']:
+                                const_interp = True
+            
+            interp_val = 1 if const_interp else 2            
+                
             for fbx_prop, (acurvenode_key, acurves, acurvenode_name) in acurvenodes.items():
                 # Animation curve node.
                 acurvenode = elem_data_single_int64(root, b"AnimationCurveNode", get_fbx_uuid_from_key(acurvenode_key))
@@ -1838,9 +2156,9 @@ def fbx_data_animation_elements(root, scene_data):
 
                         # key attributes...
                         nbr_keys = len(keys)
-                        # flags...
+                        # flags.. 
                         keyattr_flags = (
-                            1 << 2 |   # interpolation mode, 1 = constant, 2 = linear, 3 = cubic.
+                            1 << interp_val |   # interpolation mode, 1 = constant, 2 = linear, 3 = cubic.
                             1 << 8 |   # tangent mode, 8 = auto, 9 = TCB, 10 = user, 11 = generic break,
                             1 << 13 |  # tangent mode, 12 = generic clamp, 13 = generic time independent,
                             1 << 14 |  # tangent mode, 13 + 14 = generic clamp progressive.
@@ -2138,6 +2456,7 @@ def fbx_animations_do(scene_data, ref_id, f_start, f_end, start_zero, objects=No
     astack_key = get_blender_anim_stack_key(scene, ref_id)
     alayer_key = get_blender_anim_layer_key(scene, ref_id)
     name = (get_blenderID_name(ref_id) if ref_id else scene.name)
+    
     # Auto-Rig Pro implant, action renaming
     if '|' in name:
         if scene.arp_export_act_name == 'NONE':
@@ -2251,7 +2570,7 @@ def fbx_animations(scene_data):
                 'show_only_shape_key', 'use_shape_key_edit_mode', 'active_shape_key_index',
             )
             for p in props:
-                # Artell
+                # Auto-Rig Pro implant
                 # hack to fix the latest Blender 2.8 update
                 valid = True
                 try:
@@ -2293,8 +2612,7 @@ def fbx_animations(scene_data):
                     if scene_data.settings.export_action_only == act.name:
                         save_action = True
                 else:
-                    save_action = is_action_exportable(act)     
-                
+                    save_action = is_action_exportable(act)
                 
                 if save_action:# End Auto-Rig Pro implant
                 
@@ -2457,6 +2775,14 @@ def fbx_data_from_scene(scene, depsgraph, settings):
                     bmesh.ops.triangulate(bm, faces=bm.faces)
                     bm.to_mesh(tmp_me)
                     bm.free()
+                # Usually the materials of the evaluated object will be the same, but modifiers, such as Geometry Nodes,
+                # can change the materials.
+                orig_mats = tuple(slot.material for slot in ob.material_slots)
+                eval_mats = tuple(slot.material.original if slot.material else None 
+                        for slot in ob_to_convert.material_slots)
+                if orig_mats != eval_mats:
+                    # Override the default behaviour of getting materials from ob_obj.bdata.material_slots.
+                    ob_obj.override_materials = eval_mats
                 
                 # Auto-Rig Pro implant 
                 #   make sure to preserve the original mesh name
@@ -2496,48 +2822,63 @@ def fbx_data_from_scene(scene, depsgraph, settings):
     # ShapeKeys.
     data_deformers_shape = {}
     geom_mat_co = settings.global_matrix if settings.bake_space_transform else None    
-    for me_key, me, _free in data_meshes.values():       
+    co_bl_dtype = np.single
+    co_fbx_dtype = np.float64
+    idx_fbx_dtype = np.int32
+
+    def empty_verts_fallbacks():
+        """Create fallback arrays for when there are no verts"""
+        # FBX does not like empty shapes (makes Unity crash e.g.).
+        # To prevent this, we add a vertex that does nothing, but it keeps the shape key intact
+        single_vert_co = np.zeros((1, 3), dtype=co_fbx_dtype)
+        single_vert_idx = np.zeros(1, dtype=idx_fbx_dtype)
+        return single_vert_co, single_vert_idx
+
+    for me_key, me, _free in data_meshes.values():    
         if not (me.shape_keys and len(me.shape_keys.key_blocks) > 1):  # We do not want basis-only relative skeys... 
             continue
         if me in data_deformers_shape:
             continue
 
-        shapes_key = get_blender_mesh_shape_key(me)      
-        # We gather all vcos first, since some skeys may be based on others...
-        _cos = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.vertices) * 3
-        me.vertices.foreach_get("co", _cos)
-        v_cos = tuple(vcos_transformed_gen(_cos, geom_mat_co))
-        sk_cos = {}
-        for shape in me.shape_keys.key_blocks[1:]:            
-            shape.data.foreach_get("co", _cos)
-            sk_cos[shape] = tuple(vcos_transformed_gen(_cos, geom_mat_co))
-        sk_base = me.shape_keys.key_blocks[0]
-      
-        for shape in me.shape_keys.key_blocks[1:]:          
-            # Only write vertices really different from org coordinates!        
-            shape_verts_co = []
-            shape_verts_idx = []
+        shapes_key = get_blender_mesh_shape_key(me)
 
-            sv_cos = sk_cos[shape]
-            ref_cos = v_cos if shape.relative_key == sk_base else sk_cos[shape.relative_key]
-            for idx, (sv_co, ref_co) in enumerate(zip(sv_cos, ref_cos)):
-                if similar_values_iter(sv_co, ref_co):
-                    # Note: Maybe this is a bit too simplistic, should we use real shape base here? Though FBX does not
-                    #       have this at all... Anyway, this should cover most common cases imho.
-                    continue
-                shape_verts_co.extend(Vector(sv_co) - Vector(ref_co))
-                shape_verts_idx.append(idx)
+        sk_base = me.shape_keys.key_blocks[0]
+
+        # Get and cache only the cos that we need
+        @cache
+        def sk_cos(shape_key):
+            _cos = np.empty(len(me.vertices) * 3, dtype=co_bl_dtype)
+            if shape_key == sk_base:
+                me.vertices.foreach_get("co", _cos)
+            else:
+                shape_key.data.foreach_get("co", _cos)
+            return vcos_transformed(_cos, geom_mat_co, co_fbx_dtype)            
+     
+        for shape in me.shape_keys.key_blocks[1:]:          
+            # Only write vertices really different from base coordinates!
+            relative_key = shape.relative_key
+            if shape == relative_key:
+                # Shape is its own relative key, so it does nothing
+                shape_verts_co, shape_verts_idx = empty_verts_fallbacks()
+            else:
+                sv_cos = sk_cos(shape)
+                ref_cos = sk_cos(shape.relative_key)
                 
-            # FBX does not like empty shapes (makes Unity crash e.g.).
-            # To prevent this, we add a vertex that does nothing, but it keeps the shape key intact                                                      
-            if not shape_verts_co:
-                shape_verts_co.extend((0, 0, 0))
-                shape_verts_idx.append(0)
+            # Exclude cos similar to ref_cos and get the indices of the cos that remain
+                shape_verts_co, shape_verts_idx = shape_difference_exclude_similar(sv_cos, ref_cos)
+
+                if not shape_verts_co.size:
+                    shape_verts_co, shape_verts_idx = empty_verts_fallbacks()
+                else:
+                    # Ensure the indices are of the correct type
+                    shape_verts_idx = astype_view_signedness(shape_verts_idx, idx_fbx_dtype)
                 
             channel_key, geom_key = get_blender_mesh_shape_channel_key(me, shape)
             data = (channel_key, geom_key, shape_verts_co, shape_verts_idx)
             data_deformers_shape.setdefault(me, (me_key, shapes_key, {}))[2][shape] = data
             
+        del sk_cos
+        
     #perfmon.step("FBX export prepare: Wrapping Armatures...")
 
     # Armatures!
@@ -2572,8 +2913,7 @@ def fbx_data_from_scene(scene, depsgraph, settings):
     data_materials = {}
     for ob_obj in objects:
         # If obj is not a valid object for materials, wrapper will just return an empty tuple...
-        for ma_s in ob_obj.material_slots:
-            ma = ma_s.material
+        for ma in ob_obj.materials:                              
             if ma is None:
                 continue  # Empty slots!
             # Note theoretically, FBX supports any kind of materials, even GLSL shaders etc.
@@ -2595,11 +2935,14 @@ def fbx_data_from_scene(scene, depsgraph, settings):
         #       given that textures actually do not exist anymore in material context in Blender...
         ma_wrap = node_shader_utils.PrincipledBSDFWrapper(ma, is_readonly=True)
         for sock_name, fbx_name in PRINCIPLED_TEXTURE_SOCKETS_TO_FBX:
+        
+            # Auto-Rig Pro implant, Blender 2.90 doesn't support all inputs
             tex = None
-            try:# Auto-Rig Pro implant, Blender 2.90 doesn't support all inputs
+            try:
                 tex = getattr(ma_wrap, sock_name)
             except:
                 pass
+                
             if tex is None or tex.image is None:
                 continue
             blender_tex_key = (ma, sock_name)
@@ -2803,6 +3146,9 @@ def fbx_data_from_scene(scene, depsgraph, settings):
                 continue
             _mesh_key, me, _free = data_meshes[ob_obj]
             idx = _objs_indices[ob_obj] = _objs_indices.get(ob_obj, -1) + 1
+            # XXX If a mesh has multiple material slots with the same material, they are combined into one slot.
+            # Even if duplicate materials were exported without combining them into one slot, keeping duplicate
+            # materials separated does not appear to be common behaviour of external software when importing FBX.
             mesh_material_indices.setdefault(me, {})[ma] = idx
     del _objs_indices
 
@@ -2991,6 +3337,7 @@ def fbx_header_elements(root, scene_data, time=None):
         if similar_values(fps, ref_fps):
             fbx_fps = ref_fps
             fbx_fps_mode = fps_mode
+            break     
     elem_props_set(props, "p_enum", b"TimeMode", fbx_fps_mode)
     elem_props_set(props, "p_timestamp", b"TimeSpanStart", 0)
     elem_props_set(props, "p_timestamp", b"TimeSpanStop", FBX_KTIME)
@@ -3183,6 +3530,8 @@ def save_single(operator, scene, depsgraph, filepath="",
                 use_custom_props=False,
                 bake_space_transform=False,
                 armature_nodetype='NULL',
+                colors_type='SRGB',
+                prioritize_active_color=False,
                 shape_keys_baked_data=None,# Auto-Rig Pro implant
                 export_action_only='all_actions',# //
                 **kwargs
@@ -3254,7 +3603,7 @@ def save_single(operator, scene, depsgraph, filepath="",
         add_leaf_bones, bone_correction_matrix, bone_correction_matrix_inv,
         bake_anim, bake_anim_use_all_bones, bake_anim_use_nla_strips, bake_anim_use_all_actions,
         bake_anim_step, bake_anim_simplify_factor, bake_anim_force_startend_keying,
-        False, media_settings, use_custom_props, 
+        False, media_settings, use_custom_props, colors_type, prioritize_active_color,
         shape_keys_baked_data_dict, export_action_only#Auto-Rig Pro implant
     )
 
@@ -3322,6 +3671,7 @@ def defaults_unity3d():
         "use_mesh_modifiers_render": True,
         "use_mesh_edges": False,
         "mesh_smooth_type": 'FACE',
+        "colors_type": 'SRGB',                      
         "use_subsurf": False,                     
         "use_tspace": False,  # XXX Why? Unity is expected to support tspace import...
         "use_triangles": False,                       
@@ -3383,6 +3733,14 @@ def arp_save(operator, context,
                 ctx_objects = context.view_layer.objects
         if use_visible:
             ctx_objects = tuple(obj for obj in ctx_objects if obj.visible_get())
+
+        # Ensure no Objects are in Edit mode.
+        # Copy to a tuple for safety, to avoid the risk of modifying ctx_objects while iterating.
+        for obj in tuple(ctx_objects):
+            if not ensure_object_not_in_edit_mode(context, obj):
+                operator.report({'ERROR'}, "%s could not be set out of Edit Mode, so cannot be exported" % obj.name)
+                return {'CANCELLED'}
+
         kwargs_mod["context_objects"] = ctx_objects
 
         depsgraph = context.evaluated_depsgraph_get()        
@@ -3413,6 +3771,16 @@ def arp_save(operator, context,
                     data_seq.append((coll, coll_name, 'all_objects'))
         else:
             data_seq = tuple((scene, scene.name, 'objects') for scene in bpy.data.scenes if scene.objects)
+
+        # Ensure no Objects are in Edit mode.
+        for data, data_name, data_obj_propname in data_seq:
+            # Copy to a tuple for safety, to avoid the risk of modifying the data prop while iterating it.
+            for obj in tuple(getattr(data, data_obj_propname)):
+                if not ensure_object_not_in_edit_mode(context, obj):
+                    operator.report({'ERROR'},
+                                    "%s in %s could not be set out of Edit Mode, so cannot be exported"
+                                    % (obj.name, data_name))
+                    return {'CANCELLED'}
 
         # call this function within a loop with BATCH_ENABLE == False
 

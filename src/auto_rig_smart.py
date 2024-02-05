@@ -11,7 +11,7 @@ from bpy.types import Operator
 from bpy.props import IntProperty, FloatProperty, EnumProperty, StringProperty, BoolProperty, FloatVectorProperty, CollectionProperty
 from operator import itemgetter
 
-import gpu, bgl
+import gpu
 from gpu_extras.batch import *
 import gpu_extras
 
@@ -25,12 +25,6 @@ handles=[None]
 
 
 ##########################  CLASSES  ##########################
-
-
-class ARP_temp_data:
-    current_vertex_size = None
-
-arp_temp_data = ARP_temp_data()
 
 
 class ARP_OT_facial_setup(Operator):
@@ -381,6 +375,28 @@ class ARP_OT_go_detect(Operator):
                 self.report({'ERROR'}, mess)
                 return {'FINISHED'}
                 
+            # make sure all facial objects are accessible
+            for prop_name in ["arp_eyeball_name", "arp_eyeball_name_right", "arp_tongue_name", "arp_teeth_name", "arp_teeth_lower_name"]:
+                if not prop_name in scn.keys():
+                    continue    
+                
+                obj = get_object(scn[prop_name])
+                if obj == None:# not set
+                    continue
+                    
+                # enable collections
+                for col in obj.users_collection:
+                    col.hide_viewport = False
+                    col.hide_select = False
+                    # enable layers collections
+                    layer_col = search_layer_collection(bpy.context.view_layer.layer_collection, col.name)
+                    if layer_col:
+                        layer_col.exclude = False
+                        layer_col.hide_viewport = False
+                    
+                # unhide
+                unhide_object(obj)
+                
             
             # Check if all facial setup verts are on the surface mesh               
             # if facial, disable head weights refine (will be skipped anyway when binding, but for clarity)
@@ -444,11 +460,13 @@ class ARP_OT_go_detect(Operator):
                 self.rigs_found_items = []
             
             for obj in bpy.data.objects:
+                if obj.override_library:
+                    continue
                 if obj.type == "ARMATURE":     
                     if len(obj.keys()):
-                        if 'arp_rig_type' in obj.keys():               
+                        if 'arp_rig_type' in obj.keys() and len(obj.users_collection):# check it is linked to collections. If not, might be orphan data stored deeply in the file...
                             self.rigs_found_items.append((obj.name, obj.name, obj.name))
-                            #print("  found rig", obj.name)
+                            print("  found existing rig:", obj.name)
             
             bpy.types.Scene.rigs_found = EnumProperty(items=self.rigs_found_items)
             
@@ -601,11 +619,7 @@ class ARP_OT_go_detect(Operator):
             if scn.arp_smart_sym:
                 bpy.context.active_object.data.use_mirror_x = True
 
-            _layers = bpy.context.active_object.data.layers
-            _layers[17] = True
-            for i in range(0,31):
-                if i != 17:
-                    _layers[i] = False
+            enable_layer_exclusive('Reference')           
 
             # enable in-front display
             bpy.context.active_object.show_in_front = True
@@ -649,11 +663,8 @@ class ARP_OT_go_detect(Operator):
                 #   auto merge
                 scn.tool_settings.use_mesh_automerge = automerge_value
                 #   restore cursor position
-                scn.cursor.location = cursor_current_position
-            
-            # restore vertex sizes
-            if arp_temp_data.current_vertex_size:
-                bpy.context.preferences.themes[0].view_3d.vertex_size = arp_temp_data.current_vertex_size
+                scn.cursor.location = cursor_current_position            
+
             
             # restore undo
             context.preferences.edit.use_global_undo = use_global_undo
@@ -676,6 +687,9 @@ class ARP_OT_markers_fx(Operator):
     arp_marker_to_select : StringProperty(default="")
     img_name = 'arp_smart_circle'
     img_over_name = 'arp_smart_circle_over'
+    img_blue_name = 'arp_smart_circle_blue'
+    img_yellow_name = 'arp_smart_circle_yellow'
+    img_red_name = 'arp_smart_circle_red'
     shader_type = '2D_UNIFORM_COLOR'
     shader_img_type = 'IMAGE_COLOR'
     
@@ -689,10 +703,16 @@ class ARP_OT_markers_fx(Operator):
         self.circle_color = (0.0, 0.9, 0.5, 0.3)
         self.border_color = (0.5, 0.9, 0.5, 0.6)
         self.center_color = (1, 1, 1, 1)
+        self.blue_color = (0.0, 0.7, 1.0, 0.8)
+        self.yellow_color = (1.0, 1.0, 0.0, 0.5)
+        self.red_color = (1.0, 0.0, 0.0, 0.5)
         
         # icon
         self.img_circle = None
         self.img_circle_over = None
+        self.img_circle_blue = None
+        self.img_circle_yellow = None
+        self.img_circle_red = None
         self.tex = None
         
         # internal vars
@@ -716,7 +736,11 @@ class ARP_OT_markers_fx(Operator):
             self.shader_img_type = '2D_IMAGE'
             
         
+    
     def draw(self, context):
+        if bpy.context.scene.arp_disable_smart_fx:
+            return
+            
         # update datas   
         arp_markers = get_object('arp_markers')
         
@@ -746,62 +770,14 @@ class ARP_OT_markers_fx(Operator):
                 _x = object_loc_2d[0]
                 _y = object_loc_2d[1]
                 
-                draw_mode = 'IMAGE'
                 shader = None
-                batch = None
-                
-                if draw_mode == 'SHAPE':                
-                    vertices = ()
-                    vertices_dot = ()
-                    vertices_outline = ()
-                    indices_outline = ()
-
-                    # generate shapes vertices
-                    for i in range(0, self.num_segments):
-                        t = 2 * 3.1415926 * i / self.num_segments
-
-                        # 1.main circle
-                        co_x = _x + math.sin(t) * self.radius
-                        co_y = _y + math.cos(t) * self.radius
-                        vertices += ((co_x, co_y),)
-
-                        # 2.outline circle
-                        co_x_out = _x + math.sin(t) * self.radius_outline
-                        co_y_out = _y + math.cos(t) * self.radius_outline
-                        vertices_outline += ((co_x, co_y),)
-                        vertices_outline += ((co_x_out, co_y_out),)
-
-                            # loop the circle at the end
-                        if i == (self.num_segments-1):
-                            vertices_outline += (vertices_outline[0], vertices_outline[1])
-
-                        indices_outline += ((i*2, i*2+1, i*2+2),(i*2+1, i*2+2, i*2+3))
-
-                        # 3.center circle
-                        co_x_dot = _x + math.sin(t) * self.radius_dot
-                        co_y_dot = _y + math.cos(t) * self.radius_dot
-                        vertices_dot += ((co_x_dot, co_y_dot),)
-
-                    # Disk batch and shader
-                    # modes: POINTS, TRIS, TRI_FAN, LINES. Warning, LINES_ADJ does not work
-                    # main circle
-                    self.shader = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
-                    self.batch = batch_for_shader(self.shader, 'TRI_FAN', {"pos": vertices})
-
-                    # center circle
-                    self.shader_center = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
-                    self.batch_center = batch_for_shader(self.shader_center, 'TRI_FAN', {"pos": vertices_dot})
-
-                    # outline circle
-                    self.shader_outline = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
-                    self.batch_outline = batch_for_shader(self.shader_outline, 'TRIS', {"pos": vertices_outline}, indices = indices_outline)
-                    
-                elif draw_mode == 'IMAGE':                    
-                    shader = gpu.shader.from_builtin(self.shader_img_type)
-                    scale = 20
-                    batch = batch_for_shader(shader, 'TRI_FAN', 
-                        {"pos": ((_x-scale, _y-scale), (_x+scale, _y-scale), (_x+scale, _y+scale), (_x-scale, _y+scale)),
-                        "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
+                batch = None            
+                            
+                shader = gpu.shader.from_builtin(self.shader_img_type)
+                scale = 20
+                batch = batch_for_shader(shader, 'TRI_FAN', 
+                    {"pos": ((_x-scale, _y-scale), (_x+scale, _y-scale), (_x+scale, _y+scale), (_x-scale, _y+scale)),
+                    "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
                     
                 # line connection
                 shader_line = None
@@ -810,9 +786,8 @@ class ARP_OT_markers_fx(Operator):
                     shader_line = gpu.shader.from_builtin(self.shader_type)
                     batch_line = batch_for_shader(shader_line, 'LINES', {'pos': (par_object_loc_2d, object_loc_2d)})
 
-                # Highlight the selected marker/mouse over
-                if draw_mode == 'IMAGE':  
-                    self.tex = gpu.texture.from_image(self.img_circle)
+                # Highlight the selected marker/mouse over     
+                self.tex = gpu.texture.from_image(self.img_circle)
                 
                 final_color = self.circle_color
                 border_final_color = self.border_color
@@ -821,65 +796,85 @@ class ARP_OT_markers_fx(Operator):
                     is_in_hotspot = bool((Vector((_x, _y)) - Vector((self.mouse_x, self.mouse_y))).magnitude < 22)
                     if is_in_hotspot:
                         self.hotspot_selectable_marker = obj.name
-                    if bpy.context.active_object == obj or is_in_hotspot:
-                        if draw_mode == 'IMAGE':  
-                            self.tex = gpu.texture.from_image(self.img_circle_over)
-                        elif draw_mode == 'SHAPE':
-                            # change color
-                            final_color = ()
-                            for i in range(0,3):
-                                final_color += (self.circle_color[i]+0.4,)
-                            final_color += (self.circle_color[3]-0.2,)# alpha
+                    if bpy.context.active_object == obj or is_in_hotspot:                       
+                        self.tex = gpu.texture.from_image(self.img_circle_over)
+                        
 
-                            border_final_color = ()
-                            for i in range(0,3):
-                                border_final_color += (self.border_color[i]+0.4,)
-                            border_final_color += (self.circle_color[3]+0.4,)# alpha
-
-                # Render
-                if draw_mode == 'SHAPE':
-                    #   main circle
-                    self.shader.bind()
-                    self.shader.uniform_float("color", final_color)
-                    
-                    #   anti-aliasing -begins
-                    bgl.glHint(bgl.GL_POLYGON_SMOOTH_HINT, bgl.GL_NICEST)               
-                    bgl.glEnable(bgl.GL_POLYGON_SMOOTH)
-                    
-                    bgl.glEnable(bgl.GL_BLEND)
-                    self.batch.draw(self.shader)
-                    bgl.glDisable(bgl.GL_BLEND)
-
-                    #   outline circle
-                    self.shader_outline.bind()
-                    self.shader_outline.uniform_float("color", border_final_color)#self.border_color)
-                    bgl.glEnable(bgl.GL_BLEND)                
-                    self.batch_outline.draw(self.shader_outline) 
-                    
-                    #   dot circle
-                    self.shader_center.bind()
-                    self.shader_center.uniform_float("color", self.center_color)
-                    self.batch_center.draw(self.shader_center)
-                
-                    #   anti-aliasing -ends
-                    bgl.glDisable(bgl.GL_POLYGON_SMOOTH) 
-                    bgl.glDisable(bgl.GL_BLEND)
-                
-                elif draw_mode == 'IMAGE':
-                    shader.bind()                    
-                    shader.uniform_sampler("image", self.tex) 
-                    batch.draw(shader)
-                    
+                # Render               
+                shader.bind()                    
+                shader.uniform_sampler("image", self.tex) 
+                batch.draw(shader)                    
                     
                 #   line connection
                 if par_object_loc_2d:
                     shader_line.bind()
-                    shader_line.uniform_float("color", border_final_color)#self.border_color)
-                    #bgl.glEnable(bgl.GL_BLEND)                
+                    shader_line.uniform_float("color", border_final_color)#self.border_color)               
                     batch_line.draw(shader_line)
                     
                     
+            facial_mesh = get_object('arp_facial_setup')
+            
+            if facial_mesh and bpy.context.mode == 'EDIT_MESH' and bpy.context.view_layer.objects.active == facial_mesh:
+                _mesh = bmesh.from_edit_mesh(facial_mesh.data)
+
+                for vert in _mesh.verts:
+                    bname = get_facial_marker_vert_bone(vert.index)
+                    if bname == None:
+                        continue
+                        
+                    vert_loc_2d = bpy_extras.view3d_utils.location_3d_to_region_2d(self.region, self.region_3d, facial_mesh.matrix_world @ vert.co, default=None)
+                    _x = vert_loc_2d[0]
+                    _y = vert_loc_2d[1]                    
+                
+                    shader = gpu.shader.from_builtin(self.shader_img_type)
+                    scale = 10
+                    batch = batch_for_shader(shader, 'TRI_FAN', 
+                        {"pos": ((_x-scale, _y-scale), (_x+scale, _y-scale), (_x+scale, _y+scale), (_x-scale, _y+scale)),
+                        "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
+                        
+                    shader.bind()
+                    
+                    self.tex = gpu.texture.from_image(self.img_circle)
+                    
+                    if 'eyebrow' in bname:   
+                        self.tex = gpu.texture.from_image(self.img_circle_yellow)
+                    elif 'eyelid' in bname:
+                        self.tex = gpu.texture.from_image(self.img_circle_blue)
+                    elif 'lips' in bname:
+                        self.tex = gpu.texture.from_image(self.img_circle_red)
+                    
+                    shader.uniform_sampler("image", self.tex) 
+                    batch.draw(shader)
+                    
+                for edge in _mesh.edges:       
+                    v1 = edge.verts[0]
+                    v2 = edge.verts[1]
+                    vert1_loc_2d = bpy_extras.view3d_utils.location_3d_to_region_2d(self.region, self.region_3d, facial_mesh.matrix_world @ v1.co, default=None)
+                    vert2_loc_2d = bpy_extras.view3d_utils.location_3d_to_region_2d(self.region, self.region_3d, facial_mesh.matrix_world @ v2.co, default=None)
+                    shader_line = gpu.shader.from_builtin(self.shader_type)
+                    batch_line = batch_for_shader(shader_line, 'LINES', {'pos': (vert1_loc_2d, vert2_loc_2d)})
+                    shader_line.bind()
+                    
+                    line_color = border_final_color
+                    bname = get_facial_marker_vert_bone(v1.index)
+                    if 'eyebrow' in bname:   
+                        line_color = self.yellow_color
+                    if 'eyelid' in bname:   
+                        line_color = self.blue_color
+                    if 'lips' in bname:   
+                        line_color = self.red_color
+                    
+                    shader_line.uniform_float("color", line_color)
+                    batch_line.draw(shader_line)
+                
+                del _mesh
+                    
+                    
+        
     def modal(self, context, event):    
+        if bpy.context.scene.arp_disable_smart_fx:
+            return
+            
         # enable constant update for mouse-over evaluation function
         if context.area:
             context.area.tag_redraw()
@@ -907,7 +902,7 @@ class ARP_OT_markers_fx(Operator):
                 pass
                 
             # clear image cache
-            for img_name in [self.img_name, self.img_over_name]:
+            for img_name in [self.img_name, self.img_over_name, self.img_blue_name, self.img_yellow_name, self.img_red_name]:
                 img = bpy.data.images.get(img_name)
                 if img:
                     bpy.data.images.remove(img)
@@ -949,6 +944,36 @@ class ARP_OT_markers_fx(Operator):
                 img = bpy.data.images.load(fp)
                 img.name = self.img_over_name
             self.img_circle_over = img
+            
+        if self.img_circle_blue == None:
+            img = bpy.data.images.get(self.img_blue_name)
+            if img == None:
+                dir = os.path.dirname(os.path.abspath(__file__))
+                addon_dir = os.path.dirname(dir)
+                fp = addon_dir + '/icons/circle_blue.png'
+                img = bpy.data.images.load(fp)
+                img.name = self.img_blue_name
+            self.img_circle_blue = img
+            
+        if self.img_circle_yellow == None:
+            img = bpy.data.images.get(self.img_yellow_name)
+            if img == None:
+                dir = os.path.dirname(os.path.abspath(__file__))
+                addon_dir = os.path.dirname(dir)
+                fp = addon_dir + '/icons/circle_yellow.png'
+                img = bpy.data.images.load(fp)
+                img.name = self.img_yellow_name
+            self.img_circle_yellow = img
+            
+        if self.img_circle_red == None:
+            img = bpy.data.images.get(self.img_red_name)
+            if img == None:
+                dir = os.path.dirname(os.path.abspath(__file__))
+                addon_dir = os.path.dirname(dir)
+                fp = addon_dir + '/icons/circle_red.png'
+                img = bpy.data.images.load(fp)
+                img.name = self.img_red_name
+            self.img_circle_red = img
         
 
         # get mouse select button
@@ -970,8 +995,10 @@ class ARP_OT_markers_fx(Operator):
             if bpy.context.scene.arp_debug_mode:
                 print('Start Markers FX')
             context.scene.arp_smart_markers_enable = True
-            handles[0] = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_3_args, args, 'WINDOW', 'POST_PIXEL')
-            context.window_manager.modal_handler_add(self)
+            
+            if bpy.context.scene.arp_disable_smart_fx == False:
+                handles[0] = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_3_args, args, 'WINDOW', 'POST_PIXEL')
+                context.window_manager.modal_handler_add(self)
 
             return {'RUNNING_MODAL'}
 
@@ -1278,6 +1305,12 @@ def clear_object_selection():
     bpy.ops.object.select_all(action='DESELECT')
     
     
+def get_facial_marker_vert_bone(vert_idx):
+    for bname in ard.facial_markers:
+        if ard.facial_markers[bname] == vert_idx:
+            return bname
+        
+    
 def _disable_facial_setup():
     # Hide meshes objects
     for obj in bpy.data.objects:
@@ -1291,9 +1324,6 @@ def _disable_facial_setup():
     if temp_obj:
         unhide_object(temp_obj)
     
-    # Restore user define vertex sizes
-    if arp_temp_data.current_vertex_size:
-        bpy.context.preferences.themes[0].view_3d.vertex_size = arp_temp_data.current_vertex_size
 
     #center front view
     body_t = get_object(bpy.context.scene.arp_body_name)    
@@ -1371,10 +1401,6 @@ def _facial_setup():
     # set X Mirror
     obj.data.use_mirror_x = scn.arp_smart_sym
     obj.hide_select = False
-    
-    # Make big vertices
-    arp_temp_data.current_vertex_size = bpy.context.preferences.themes[0].view_3d.vertex_size
-    bpy.context.preferences.themes[0].view_3d.vertex_size = 8
 
     if not arp_facial_is_there:
         # set pos and scale
@@ -1701,11 +1727,8 @@ def _match_ref(self):
     bpy.ops.object.mode_set(mode='EDIT')
     
 
-    # display all layers
-    _layers = rig.data.layers
-    for i in range(0, 31):
-        _layers[i] = True
-
+    # display all layers    
+    _layers = enable_all_armature_layers()
     
     sides = [".l", ".r"]
     side = ".l"
@@ -2322,6 +2345,8 @@ def _match_ref(self):
             
         tongue_object = get_object(scn.arp_tongue_name)
         
+        tongue_raycasted = False
+        
         if tongue_object:# get exact tongue positions from object raycast
             unhide_object(tongue_object)
             tongue_object.hide_select = False
@@ -2340,6 +2365,8 @@ def _match_ref(self):
                 ray_inc = ray_dir.normalized() * 0.0001
                 result, loc, normal, index = obj_eval.ray_cast(ray_origin, ray_dir)
 
+                hit_front = None
+                
                 if result:        
                     hit_front = loc.copy()
                     have_hit = True
@@ -2354,16 +2381,18 @@ def _match_ref(self):
                 else:
                     print('    Tongue raycast'+str(idx)+' failed!')
 
-                hit_center = (hit_front + hit_back) * 0.5
-                tongue_xx_loc = obj_eval.matrix_world @ hit_center# convert to world space
-                tongue_xx_loc = rig_matrix_world_inv @ tongue_xx_loc# convert to armature space
-                tongue_xx = get_edit_bone(tongue_names[idx])
-                move_vec = (tongue_xx_loc - tongue_xx.head)
-                tongue_xx.head += move_vec
-                if idx == 2:
-                    tongue_xx.tail += move_vec
+                if hit_front:
+                    tongue_raycasted = True
+                    hit_center = (hit_front + hit_back) * 0.5
+                    tongue_xx_loc = obj_eval.matrix_world @ hit_center# convert to world space
+                    tongue_xx_loc = rig_matrix_world_inv @ tongue_xx_loc# convert to armature space
+                    tongue_xx = get_edit_bone(tongue_names[idx])
+                    move_vec = (tongue_xx_loc - tongue_xx.head)
+                    tongue_xx.head += move_vec
+                    if idx == 2:
+                        tongue_xx.tail += move_vec
             
-        else:# average tongue position
+        if tongue_raycasted == False:# no tongue_object, or raycast failed, then average tongue position
             for name in tongue_names:
                 if 'tong_03' in name:
                     get_edit_bone(name).head += transf_vec
@@ -2470,12 +2499,9 @@ def _match_ref(self):
         auto_rig.set_facial(enable=False)
         
 
-    #display layer 17 only
-    for i in range(0,31):
-        if i != 17:
-            _layers[i] = False
-
-
+    # display reference layer only
+    enable_layer_exclusive('Reference')
+   
     print("\n    matching end.")
     bpy.ops.armature.select_all(action='DESELECT')
 
@@ -4430,7 +4456,9 @@ def _auto_detect(self):
             toes_start_loc[2] = (bound_toes_top + bound_toes_bot) * 0.5
 
             # create empty location
-            foot_dict = {'ankle_loc':[ankle_empty_loc, "ankle_loc"], 'bank_left_loc':[bank_left_loc,"bank_left_loc"],'bank_right_loc':[bank_right_loc, "bank_right_loc"],'bank_mid_loc':[bank_mid_loc,"bank_mid_loc"],'toes_end':[toes_end_loc,"toes_end"],'toes_start':[toes_start_loc,"toes_start"]}
+            foot_dict = {'ankle_loc':[ankle_empty_loc, "ankle_loc"], 'bank_left_loc':[bank_left_loc,"bank_left_loc"],
+                    'bank_right_loc':[bank_right_loc, "bank_right_loc"],'bank_mid_loc':[bank_mid_loc,"bank_mid_loc"],
+                    'toes_end':[toes_end_loc,"toes_end"],'toes_start':[toes_start_loc,"toes_start"]}
 
             for key, value in foot_dict.items():
                 create_empty_loc(0.04, value[0], value[1]+side)
@@ -4926,12 +4954,15 @@ def _auto_detect(self):
     head_empty_loc = [chin_loc.location[0], head_back[1] + (head_front[1] - head_back[1]) * 0.3, head_height]
     
    
-    # get the head top by raycast
-    head_top = None
+    # get the head top by raycast    
     ray_dir = Vector((0, body_depth*4, 0))
-    body_top = body_height
-    if scene.arp_smart_type == 'FACIAL':
+    body_top = None
+    head_top = None
+    
+    if scene.arp_smart_type == 'FACIAL':# 'facial only' mode has no toes markers
         body_top = body.bound_box[1][2]
+    else:
+        body_top = body_height + get_object('toes_end.l_auto').location[2]# add offset if feet above ground
         
     ray_ori = Vector((chin_loc.location[0], -body_depth*2, body_top))
     ray_offset = (body_top-head_height)/100
@@ -5021,10 +5052,6 @@ def _cancel_and_delete_markers():
             scene.arp_facial_markers_save.remove(i)
             i -= 1
 
-    # Restore user define vertex sizes
-    if arp_temp_data.current_vertex_size:
-        bpy.context.preferences.themes[0].view_3d.vertex_size = arp_temp_data.current_vertex_size
-
     # Store in property
     arp_markers = get_object("arp_markers", view_layer_change=True)
     for obj in arp_markers.children:
@@ -5101,6 +5128,9 @@ def _get_selected_objects():
     
     set_selection_filters(['EMPTY', 'MESH', 'ARMATURE'], True)
     show_extras(True)
+    # comment out for now. Some users like to use Gizmos to translate markers
+    #bpy.context.space_data.show_gizmo = False
+
     
     #get character mesh name
     body = get_object(bpy.context.scene.arp_body_name)
@@ -5258,12 +5288,6 @@ def update_sym(self,context):
             _cancel_facial_setup()
     """
 
-@persistent
-# Function called when loading a new file, to revert unwanted changes
-# i.e vertex sizes may have been changed
-def revert_arp_changes(scene):
-    if arp_temp_data.current_vertex_size:
-        bpy.context.preferences.themes[0].view_3d.vertex_size = arp_temp_data.current_vertex_size
 
 
 # COLLECTION PROPERTIES DEFINITION
@@ -5586,7 +5610,6 @@ def register():
     bpy.types.Scene.arp_smart_preset_settings = EnumProperty(items=(('DEFAULT', 'ARP Default', 'Default settings'), ('UE4', 'UE4 Mannequin', 'UE4 humanoid skeleton'), ('UE5', 'UE5 Manny-Quinn', 'UE5 humanoid skeleton')), 
                                                 description='Preset settings', update=update_smart_presets)
     bpy.types.Scene.arp_smart_markers_enable = BoolProperty(default=False)
-    bpy.app.handlers.load_pre.append(revert_arp_changes)    
     
 
 def unregister():
@@ -5617,7 +5640,5 @@ def unregister():
     del bpy.types.Scene.arp_smart_type
     del bpy.types.Scene.arp_smart_preset_settings
     del bpy.types.Scene.arp_smart_markers_enable
-
-    bpy.app.handlers.load_pre.remove(revert_arp_changes)
 
 

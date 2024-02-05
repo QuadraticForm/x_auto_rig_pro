@@ -118,10 +118,14 @@ def transfer_shape_keys_deformed(source_obj, target_obj, apply_mods=False):
             target_sk.value = sk.value
             target_sk.slider_min, target_sk.slider_max = sk.slider_min, sk.slider_max
             #target_sk = target_obj.data.shape_keys.key_blocks[sk_index]       
-           
+            
+            print('target_sk vert count:', len(target_sk.data))
+            print('mesh_baked1 vert count:', len(mesh_baked1.verts))
+            
             # correct the deformed vert coordinates
             for deformed_vert_index in deformed_verts_index_list:
                 #print("set vertex", deformed_vert_index, "from", target_sk.data[deformed_vert_index].co, "TO", mesh_baked1.verts[deformed_vert_index].co)
+                
                 target_sk.data[deformed_vert_index].co = mesh_baked1.verts[deformed_vert_index].co
                 
         else:# looks like a modifier is adding or removing verts from one shape key to another... not supported! (e.g Bevel, angle based, Decimate...)
@@ -373,6 +377,9 @@ def copy_vgroup(object=None, dict=None):
             tar_grp_names = dict[grp_name_base]
             for tar_grp_name in tar_grp_names:
                 tar_grp = object.vertex_groups.get(tar_grp_name+side)
+                if tar_grp == None:
+                    continue
+                    
                 # remove current tar group
                 object.vertex_groups.remove(tar_grp)
                 # copy source group

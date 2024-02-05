@@ -99,6 +99,7 @@ def bake_anim(frame_start=0, frame_end=10, only_selected=False, bake_bones=True,
 
     def get_bones_matrix():
         matrices_dict = {}
+
         for pbone in armature.pose.bones:
             if only_selected and not pbone.bone.select:
                 continue
@@ -160,8 +161,8 @@ def bake_anim(frame_start=0, frame_end=10, only_selected=False, bake_bones=True,
                     obj_data_name = obj_base.data.name
                 else:
                     obj_data_name = ob.data.name
+                #print('Bake shape key', obj_data_name, sk.name, sk.value)
                 dict_entry = action_export_name+'|'+'BMesh#'+obj_data_name+'|Shape|BShape Key#'+sk.name+'|'+str(frame_in_action)
-                #print(dict_entry, sk.value)
                 _self.shape_keys_data[dict_entry] = sk.value
                 
 
@@ -189,6 +190,7 @@ def bake_anim(frame_start=0, frame_end=10, only_selected=False, bake_bones=True,
 
 
     # set transforms and store keyframes
+    
     if bake_bones:
         bone_count = 0
         total_bone_count = len(armature.pose.bones)      
@@ -373,3 +375,29 @@ def get_bone_keyframes_list(pb, act):
                     key_list.append(k.co[0])
                     
     return key_list
+    
+    
+def copy_shapekeys_tracks(obj1, obj2):
+    # copy the NLA shape keys tracks from one object to another
+    
+    if obj1.data.shape_keys == None:
+        return
+    if obj1.data.shape_keys.animation_data == None:
+        return
+    
+    for anim_track in obj1.data.shape_keys.animation_data.nla_tracks:    
+        # copy sk tracks
+        if obj2.data.shape_keys.animation_data == None:
+            obj2.data.shape_keys.animation_data_create()
+            
+        track2 = obj2.data.shape_keys.animation_data.nla_tracks.get(anim_track.name)
+        if track2 == None:
+            track2 = obj2.data.shape_keys.animation_data.nla_tracks.new()
+            track2.name = anim_track.name
+            
+        for strip in anim_track.strips:
+            strip2 = track2.strips.get(strip.name)
+            if strip2 == None:
+                strip2 = track2.strips.new(strip.name, int(strip.frame_start), strip.action)
+                for setting in ['action_frame_end', 'action_frame_start', 'blend_in', 'blend_out', 'blend_type', 'extrapolation', 'frame_end', 'frame_start', 'mute', 'repeat']:
+                    setattr(strip2, setting, getattr(strip, setting))

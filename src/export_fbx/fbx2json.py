@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later                                           
 
 # Script copyright (C) 2006-2012, assimp team
 # Script copyright (C) 2013 Blender Foundation
@@ -46,6 +28,7 @@ for each property.
 
 The types are as follows:
 
+* 'Z': - INT8             
 * 'Y': - INT16
 * 'C': - BOOL
 * 'I': - INT32
@@ -124,6 +107,7 @@ def unpack_array(read, array_type, array_stride, array_byteswap):
 
 
 read_data_dict = {
+    b'Z'[0]: lambda read: unpack(b'<b', read(1))[0],  # 8 bit int                                                             
     b'Y'[0]: lambda read: unpack(b'<h', read(2))[0],  # 16 bit int
     b'C'[0]: lambda read: unpack(b'?', read(1))[0],   # 1 bit bool (yes/no)
     b'I'[0]: lambda read: unpack(b'<i', read(4))[0],  # 32 bit int
@@ -239,6 +223,7 @@ def parse(fn, use_namedtuple=True):
 data_types = type(array)("data_types")
 data_types.__dict__.update(
 dict(
+INT8 = b'Z'[0],               
 INT16 = b'Y'[0],
 BOOL = b'C'[0],
 INT32 = b'I'[0],
